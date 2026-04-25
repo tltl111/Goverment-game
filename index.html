@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Government Simulator</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ==================== START SCREEN ==================== -->
+  <div id="start-screen">
+    <div class="start-content">
+      <div class="start-logo">🏛️</div>
+      <h1>GOVERNMENT SIMULATOR</h1>
+      <p class="start-subtitle">
+        Lead your nation through policy decisions, economic management, and technological progress.
+        Inspired by Democracy 4 &amp; Rebel Inc.
+      </p>
+
+      <div class="start-form">
+        <label for="empire-input">Name your empire:</label>
+        <input type="text" id="empire-input" placeholder="New Empire" maxlength="30" autocomplete="off">
+        <button class="btn-primary" onclick="startGame()">BEGIN ▶</button>
+      </div>
+
+      <div class="start-instructions">
+        <h3>How to Play</h3>
+        <ul>
+          <li>📋 Invest in <strong>policies</strong> — healthcare, economy, military &amp; more</li>
+          <li>💰 Balance your <strong>budget</strong> — taxes fund spending each turn</li>
+          <li>🔬 Research <strong>technologies</strong> to unlock powerful bonuses</li>
+          <li>🗳️ Win <strong>elections</strong> every 4 turns with 40%+ approval</li>
+          <li>🏆 Survive <strong>20 turns</strong> (5 elections) to win!</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== GAME ==================== -->
+  <div id="app" class="hidden">
+
+    <!-- HEADER -->
+    <header id="header">
+      <div class="header-left">
+        <span class="header-logo">🏛️</span>
+        <div>
+          <div id="empire-name" class="empire-name">New Empire</div>
+          <div class="header-sub">Year <span id="year">2024</span> · Turn <span id="turn">1</span></div>
+        </div>
+      </div>
+
+      <div class="header-stats">
+        <div class="hstat">
+          <div class="hstat-label">Treasury</div>
+          <div class="hstat-value" id="treasury">$5,000M</div>
+        </div>
+        <div class="hstat">
+          <div class="hstat-label">GDP</div>
+          <div class="hstat-value" id="gdp">$500B</div>
+        </div>
+        <div class="hstat">
+          <div class="hstat-label">Net / Turn</div>
+          <div class="hstat-value" id="net-income">+$0M</div>
+        </div>
+        <div class="hstat">
+          <div class="hstat-label">Happiness</div>
+          <div class="hstat-value" id="approval">50%</div>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <button id="end-turn-btn" class="btn-end-turn" onclick="endTurn()">END TURN ▶</button>
+      </div>
+    </header>
+
+    <!-- MAIN PANELS -->
+    <main id="main">
+
+      <!-- LEFT: POLICIES -->
+      <section id="policies-panel">
+        <div class="panel-header">
+          <h2>POLICIES</h2>
+          <div id="budget-bar-wrap">
+            <div class="budget-projection">
+              <div class="bp-item"><span>Income</span> <span id="proj-income" class="positive">$0M</span></div>
+              <div class="bp-item"><span>Spending</span> <span id="proj-spending" class="negative">$0M</span></div>
+              <div class="bp-item-net"><span>Net / turn</span> <span id="proj-net" class="positive">$0M</span></div>
+            </div>
+            <div class="budget-bar-bg">
+              <div class="budget-bar-fill" id="budget-bar-fill" style="width:0%"></div>
+            </div>
+          </div>
+        </div>
+        <div id="policy-tabs" class="tab-bar">
+          <button class="tab-btn active" onclick="showPolicyTab('all', this)">All</button>
+          <button class="tab-btn" onclick="showPolicyTab('economy', this)">Economy</button>
+          <button class="tab-btn" onclick="showPolicyTab('social', this)">Social</button>
+          <button class="tab-btn" onclick="showPolicyTab('security', this)">Security</button>
+        </div>
+
+        <!-- Tax Rate (always shown) -->
+        <div id="tax-policy-card" class="policy-card tax-card">
+          <div class="policy-header">
+            <span class="policy-icon">💰</span>
+            <span class="policy-name">Tax Rate</span>
+            <span class="policy-cost positive" id="tax-income-label">+$1,100M/turn</span>
+          </div>
+          <p class="policy-desc">Set the national tax rate. Higher taxes raise more revenue but reduce citizen happiness and approval.</p>
+          <div class="tax-slider-row">
+            <span class="tax-label">10%</span>
+            <input type="range" id="tax-slider" min="0" max="40" value="20" oninput="setTaxRate(this.value)">
+            <span class="tax-label">40%</span>
+          </div>
+          <div class="tax-value-display">Current rate: <strong id="tax-rate-display">22%</strong></div>
+        </div>
+
+        <div id="policies-list">
+          <!-- Generated by JS -->
+        </div>
+        <div id="trade-routes-panel">
+          <!-- Generated by JS -->
+        </div>
+      </section>
+
+      <!-- CENTER: DASHBOARD -->
+      <section id="dashboard">
+        <div id="dashboard-tabs" class="tab-bar">
+          <button class="tab-btn active" onclick="showDashboardTab('overview', this)">Overview</button>
+          <button class="tab-btn" onclick="showDashboardTab('events', this)">Events Log</button>
+        </div>
+
+        <div id="tab-overview" class="dashboard-tab">
+          <!-- Generated by JS -->
+        </div>
+        <div id="tab-events" class="dashboard-tab hidden">
+          <div id="events-list">
+            <!-- Generated by JS -->
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: RESEARCH -->
+      <section id="research-panel">
+        <div class="panel-header">
+          <h2>RESEARCH</h2>
+          <div class="rp-display">
+            🏗️ <span id="centre-count">0</span> centres &nbsp;·&nbsp; +<span id="rp-per-turn">0</span> RP/turn
+          </div>
+        </div>
+        <div id="build-centre-bar">
+          <!-- Rendered by JS -->
+        </div>
+        <div id="research-tree">
+          <!-- Generated by JS -->
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ==================== NOTIFICATION CONTAINER ==================== -->
+  <div id="notification-container"></div>
+
+  <script src="js/game.js"></script>
+</body>
+</html>
