@@ -15,7 +15,6 @@
       <h1>GOVERNMENT SIMULATOR</h1>
       <p class="start-subtitle">
         Lead your nation through policy decisions, economic management, and technological progress.
-        Inspired by Democracy 4 &amp; Rebel Inc.
       </p>
 
       <div class="start-form">
@@ -162,6 +161,14 @@
   <!-- ==================== NOTIFICATION CONTAINER ==================== -->
   <div id="notification-container"></div>
 
-  <script src="js/game.js"></script>
+  <!-- Load order: utils → constants → data → state → engine → render → actions → ui -->
+  <script src="js/utils.js"></script>
+  <script src="js/constants.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/actions.js"></script>
+  <script src="js/ui.js"></script>
 </body>
 </html>
