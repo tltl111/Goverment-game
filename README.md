@@ -9,11 +9,27 @@ Lead your nation through policy decisions, economic management, and technologica
 Open `index.html` in a browser — no build step required.
 
 1. **Name your empire** and start a new game.
-2. **Invest in policies** across healthcare, economy, military, and more each turn.
+2. **Fund policies** across economy, infrastructure, social, and security each turn.
 3. **Balance your budget** — taxes fund all spending.
-4. **Research technologies** to unlock powerful bonuses and new mechanics.
-5. **Win elections** every 4 turns by maintaining 40%+ approval.
-6. Survive **20 turns (5 elections)** to win.
+4. **Build industry** — invest in Mining and Manufacturing to grow GDP; keep Mining ahead or pay import costs.
+5. **Research technologies** to unlock bonuses and reduce costs across the tech tree.
+6. **Open trade routes** via Finance level for passive income.
+7. **Build Research Centres** via infrastructure spending to accelerate research.
+
+## Current Features
+
+- Turn-based economy with GDP growth, tax income, debt/savings interest
+- Eight policies: Mining, Manufacturing, Commerce, Finance, Infrastructure, Healthcare, Education, Military
+- Four sector levels (Mining, Manufacturing, Commerce, Finance 0–100) with diminishing-returns growth and decay
+- Manufacturing hard-capped by Mining level; import costs when gap exists
+- Commerce GDP contribution amplified by Manufacturing level
+- Infrastructure level with income-proportional decay and research centre construction
+- Trade routes unlocked by Finance level
+- 17-tech tree across 4 tiers with path grouping (Economic / Social / Science), web prerequisites, and three effect types (techCostMult, infraDecayMult, infraGrowthMult)
+- Dashboard tabs: Overview · Trade Routes · Research · Buildings · Statistics · Events Log
+- Statistics screen: Economy Ledger, Sector Status, Research Tracker
+- Happiness pool with target-convergence model
+- Overspend refunds when sectors are at max capacity
 
 ## Project Structure
 

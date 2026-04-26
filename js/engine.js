@@ -4,18 +4,24 @@
 
 function getTechEffects() {
   const e = {
-    gdpGrowthBonus:    0,
-    happinessBonus:    0,
-    rpCentreBonus:     0,
-    allPolicyCostMult: 1.0,
-    policyCostMult:    {},
+    gdpGrowthBonus:        0,
+    happinessBonus:        0,
+    rpResearchCentreBonus: 0,
+    allPolicyCostMult:     1.0,
+    policyCostMult:        {},
+    techCostMult:          1.0,
+    infraDecayMult:        1.0,
+    infraGrowthMult:       1.0,
   };
   for (const id of G.unlockedTechs) {
     const fx = TECHNOLOGIES[id].effects;
-    if (fx.gdpGrowthBonus)       e.gdpGrowthBonus    += fx.gdpGrowthBonus;
-    if (fx.happinessBonus)       e.happinessBonus    += fx.happinessBonus;
-    if (fx.rpCentreBonus)        e.rpCentreBonus     += fx.rpCentreBonus;
-    if (fx.allPolicyCostMult)    e.allPolicyCostMult *= fx.allPolicyCostMult;
+    if (fx.gdpGrowthBonus)        e.gdpGrowthBonus        += fx.gdpGrowthBonus;
+    if (fx.happinessBonus)        e.happinessBonus        += fx.happinessBonus;
+    if (fx.rpResearchCentreBonus) e.rpResearchCentreBonus += fx.rpResearchCentreBonus;
+    if (fx.allPolicyCostMult)     e.allPolicyCostMult     *= fx.allPolicyCostMult;
+    if (fx.techCostMult)          e.techCostMult          *= fx.techCostMult;
+    if (fx.infraDecayMult)        e.infraDecayMult        *= fx.infraDecayMult;
+    if (fx.infraGrowthMult)       e.infraGrowthMult       *= fx.infraGrowthMult;
     if (fx.policyCostMult) {
       for (const [k, v] of Object.entries(fx.policyCostMult)) {
         e.policyCostMult[k] = (e.policyCostMult[k] || 1) * v;
@@ -25,10 +31,13 @@ function getTechEffects() {
   return e;
 }
 
+function getTechCost(techId) {
+  return Math.round(TECHNOLOGIES[techId].cost * getTechEffects().techCostMult);
+}
+
 function getTaxIncome() {
-  // GDP ($B) * taxRate * 10 = income ($M), boosted by Commerce level
-  const commerceBonus = 1 + 0.3 * (G.commerceLevel / 100);
-  return G.gdp * G.taxRate * 10 * commerceBonus;
+  // GDP ($B) * taxRate * 10 = income ($M)
+  return G.gdp * G.taxRate * 10;
 }
 
 // Cost = (funding% / 100) * tax income, modified by tech multipliers
@@ -56,7 +65,7 @@ function policyEffectScale(policyId) {
   const funding = G.policyFunding[policyId] || 0;
   if (funding <= 0) return 0;
   // Infrastructure effects are diverted toward building a research centre
-  if (policyId === 'infrastructure' && G.buildingCentre) return 0;
+  if (policyId === 'infrastructure' && G.buildingResearchCentre) return 0;
   return getTaxIncome() * (funding / 100) / POLICY_REFERENCE_SPEND;
 }
 
@@ -64,15 +73,20 @@ function getEffectiveGrowthRate() {
   let rate = G.gdpGrowthRate;
   for (const id of Object.keys(G.policyFunding)) {
     if (id === 'infrastructure') continue; // infraLevel drives this
-    if (id === 'industry' || id === 'commerce' || id === 'finance') continue; // sector levels drive these
+    if (id === 'mining' || id === 'manufacturing' || id === 'commerce' || id === 'finance') continue; // sector levels drive these
     if (POLICIES[id].effects.gdpGrowth) {
       rate += POLICIES[id].effects.gdpGrowth * policyEffectScale(id);
     }
   }
   // Infrastructure: GDP bonus scales with accumulated level (0–100)
   rate += POLICIES.infrastructure.effects.gdpGrowth * (G.infraLevel / 100);
-  // Industry sector: GDP bonus scales with accumulated level (up to +2% at level 100)
-  rate += 0.02 * (G.industryLevel / 100);
+  // Mining: GDP bonus up to +0.1% at level 100
+  rate += 0.001 * (G.miningLevel / 100);
+  // Manufacturing: effective level capped by Mining; GDP bonus up to +0.2% at effective level 100
+  const effectiveMfgLevel = Math.min(G.manufacturingLevel, G.miningLevel);
+  rate += 0.002 * (effectiveMfgLevel / 100);
+  // Commerce: GDP bonus up to +0.2% at level 100, amplified by manufacturing support
+  rate += 0.002 * (G.commerceLevel / 100) * (0.5 + 0.5 * effectiveMfgLevel / 100);
   rate += getTechEffects().gdpGrowthBonus;
 
   // --- Negative drag factors ---
@@ -122,8 +136,8 @@ function getRpPerTurn() {
   if (G.researchCentres === 0) return 0;
   // Base RP per centre + education policy bonus + tech bonus
   const eduBonus = POLICIES.education.effects.rpBonus * policyEffectScale('education');
-  const perCentre = RP_PER_CENTRE + eduBonus + getTechEffects().rpCentreBonus;
-  return perCentre * G.researchCentres;
+  const rpPerResearchCentre = RP_PER_RESEARCH_CENTRE + eduBonus + getTechEffects().rpResearchCentreBonus;
+  return rpPerResearchCentre * G.researchCentres;
 }
 
 function getTradeRouteSlots() {

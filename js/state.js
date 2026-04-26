@@ -18,12 +18,14 @@ function initGame(empireName) {
     researchCentres: 0,
     activeResearch: null,
     researchProgress: 0,
-    buildingCentre: false,
-    centreBuildProgress: 0,
+    buildingResearchCentre: false,
+    researchCentreBuildProgress: 0,
+    researchCentreBuildFraction: 50,  // % of infra budget sent to construction (rest goes to repair)
     militaryStrength: 0,
 
     // Economic sector levels (0–100), built by spending on corresponding policies
-    industryLevel: 0,
+    miningLevel: 0,
+    manufacturingLevel: 0,
     commerceLevel: 0,
     financeLevel: 0,
 
@@ -32,7 +34,8 @@ function initGame(empireName) {
 
     // Funding 0-20 = percentage of tax income allocated to this policy
     policyFunding: {
-      industry: 0,
+      mining: 0,
+      manufacturing: 0,
       commerce: 0,
       finance: 0,
       infrastructure: 0,
@@ -42,6 +45,9 @@ function initGame(empireName) {
     },
 
     unlockedTechs: [],
+
+    // Turn-by-turn snapshots for the Statistics screen (last 50 turns)
+    history: [],
 
     eventLog: [
       { message: 'Welcome! Lead ' + (empireName || 'New Empire') + ' to prosperity!', type: 'info', year: 2024 }

@@ -21,6 +21,7 @@
   --green:  #3fb950;
   --red:    #f85149;
   --yellow: #d29922;
+  --orange: #e07820;
   --purple: #bc8cff;
   --teal:   #39d353;
 
@@ -276,10 +277,10 @@ html, body {
   white-space: nowrap;
 }
 
-/* MAIN 3-COLUMN LAYOUT */
+/* MAIN 2-COLUMN LAYOUT */
 #main {
   display: grid;
-  grid-template-columns: 280px 1fr 260px;
+  grid-template-columns: 280px 1fr;
   gap: var(--panel-gap);
   padding: var(--panel-gap);
   flex: 1;
@@ -760,13 +761,13 @@ section {
   font-weight: 600;
 }
 
-#build-centre-bar {
+#build-research-centre-bar {
   padding: 8px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
-.btn-build-centre {
+.btn-build-research-centre {
   width: 100%;
   background: var(--bg-2);
   border: 1px solid var(--purple);
@@ -779,49 +780,49 @@ section {
   transition: all 0.2s;
 }
 
-.btn-build-centre:hover:not(:disabled) {
+.btn-build-research-centre:hover:not(:disabled) {
   background: var(--bg-3);
   box-shadow: 0 0 8px rgba(139, 92, 246, 0.2);
 }
 
-.btn-build-centre:disabled {
+.btn-build-research-centre:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
 /* Research centre build toggle */
-.build-centre-row {
+.build-research-centre-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.build-centre-info {
+.build-research-centre-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.build-centre-title {
+.build-research-centre-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-1);
 }
 
-.build-centre-sub {
+.build-research-centre-sub {
   font-size: 10px;
   color: var(--text-3);
 }
 
-.build-centre-hint {
+.build-research-centre-hint {
   font-size: 10px;
   color: var(--text-3);
   margin-top: 4px;
   font-style: italic;
 }
 
-.btn-toggle-build {
+.btn-toggle-research-centre {
   background: var(--bg-3);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -835,12 +836,12 @@ section {
   letter-spacing: 0.05em;
 }
 
-.btn-toggle-build:hover {
+.btn-toggle-research-centre:hover {
   border-color: var(--purple);
   color: var(--purple);
 }
 
-.btn-toggle-build.active {
+.btn-toggle-research-centre.active {
   background: rgba(139, 92, 246, 0.15);
   border-color: var(--purple);
   color: var(--purple);
@@ -870,6 +871,49 @@ section {
   font-size: 10px;
   color: var(--text-3);
   text-align: right;
+}
+
+.build-split-row {
+  margin: 6px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.build-split-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.build-split-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.build-split-slider {
+  flex: 1;
+  accent-color: var(--accent, #4a9eff);
+  cursor: pointer;
+}
+
+.build-split-val {
+  font-size: 11px;
+  color: var(--text-2);
+  min-width: 56px;
+  white-space: nowrap;
+}
+
+.build-split-val:last-child {
+  text-align: right;
+}
+
+.build-split-hint {
+  font-size: 10px;
+  color: var(--text-3);
 }
 
 /* ====== TRADE ROUTES PANEL ====== */
@@ -1271,3 +1315,200 @@ section {
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+/* ============================================================
+   RESEARCH TAB
+   ============================================================ */
+.research-tab-header {
+  display: flex;
+  gap: 16px;
+  padding: 0 2px 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+
+.research-tab-stat {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+
+.research-tab-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ============================================================
+   BUILDINGS TAB
+   ============================================================ */
+.buildings-tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ============================================================
+   STATISTICS TAB
+   ============================================================ */
+.statistics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 2px;
+}
+
+.stat-section {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.stat-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+
+.stat-section-sub {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-3);
+  opacity: 0.7;
+}
+
+/* Economy Ledger table */
+.stat-ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.stat-ledger-table th {
+  text-align: left;
+  color: var(--text-3);
+  font-weight: 600;
+  font-size: 10px;
+  padding: 0 6px 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.stat-ledger-table td {
+  padding: 4px 6px 4px 0;
+  color: var(--text-1);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.stat-ledger-table tr:last-child td {
+  border-bottom: none;
+}
+
+.stat-empty {
+  color: var(--text-3);
+  font-size: 11px;
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.stat-pos { color: var(--green); }
+.stat-neg { color: var(--red); }
+.stat-neutral { color: var(--text-3); }
+
+/* Sector Status bars */
+.stat-sectors {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.stat-sector-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 80px;
+  align-items: center;
+  gap: 8px;
+}
+
+.stat-sector-label {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.stat-sector-bar-bg {
+  background: var(--bg-4);
+  border-radius: 3px;
+  height: 6px;
+  overflow: hidden;
+}
+
+.stat-sector-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.stat-sector-val {
+  font-size: 11px;
+  color: var(--text-1);
+  text-align: right;
+}
+
+/* Research Tracker */
+.stat-research-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.stat-research-item {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.stat-research-label {
+  font-size: 10px;
+  color: var(--text-3);
+  margin-bottom: 3px;
+}
+
+.stat-research-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.stat-research-active {
+  font-size: 11px;
+  color: var(--purple);
+}
+
+.stat-research-progress-wrap {
+  margin-top: 4px;
+}
+
+.stat-research-progress-label {
+  font-size: 10px;
+  color: var(--purple);
+  margin-bottom: 3px;
+}
+
+.stat-research-bar-bg {
+  background: var(--bg-4);
+  border-radius: 3px;
+  height: 5px;
+  overflow: hidden;
+}
+
+.stat-research-bar-fill {
+  height: 100%;
+  background: var(--purple);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}

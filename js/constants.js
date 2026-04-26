@@ -8,15 +8,17 @@
 const POLICY_REFERENCE_SPEND = 20;
 
 // Research centre constants
-const CENTRE_BUILD_COST      = 1000;  // $1,000M of infrastructure spend to build one centre
+const RESEARCH_CENTRE_BUILD_COST = 1000;  // $1,000M of infrastructure spend to build one centre
 
 // Infrastructure scaling
 const INFRA_REPAIR_PER_M     = 1.0;   // base levels gained per $1M spent (at level 0)
 const INFRA_REPAIR_HARDNESS  = 0.04;  // each level makes repair harder: rate ÷ (1 + hardness×level)
-const INFRA_DECAY_BASE       = 2;     // levels lost/turn at level 0 with no funding
-const INFRA_DECAY_SCALE      = 0.10;  // extra decay per level (level 100 → −12/turn)
+// Decay scales with current income so early-game budgets can always keep up.
+// Formula: decay = income × INFRA_MAINTAIN_FRAC ÷ (1 + hardness×level)
+// This guarantees that (INFRA_MAINTAIN_FRAC × 100)% funding exactly maintains infra at any level.
+const INFRA_MAINTAIN_FRAC    = 0.10;  // 10% of income spent on infra = zero net decay
 
-const RP_PER_CENTRE          = 3;     // base RP/turn per centre
+const RP_PER_RESEARCH_CENTRE = 3;     // base RP/turn per research centre
 
 // Treasury interest (scaling)
 // Debt rate grows with debt: rate = DEBT_INTEREST_SCALE × √|debt|, capped at DEBT_INTEREST_MAX
@@ -29,11 +31,14 @@ const SAVINGS_INTEREST_SCALE = 2000;  // at $5000M savings → ~0.3%
 const HAPPINESS_BASELINE  = 40;  // happiness target with no policies and 15% tax
 const HAPPINESS_DRIFT_CAP = 3;   // max points happiness can change per turn
 
-// Economic sectors (Industry, Commerce, Finance)
+// Economic sectors (Mining, Manufacturing, Commerce, Finance)
 // Each is a level 0–100 built up via policy spending, decays when unfunded.
 const SECTOR_GROW_PER_M    = 0.5;   // base levels gained per $1M spent (at level 0)
 const SECTOR_GROW_HARDNESS = 0.04;  // diminishing returns: rate ÷ (1 + hardness×level)
 const SECTOR_DECAY         = 1.0;   // levels lost/turn when unfunded
+
+// Manufacturing import cost: paid per turn when Manufacturing level exceeds Mining level
+const MANUFACTURING_IMPORT_COST_PER_LEVEL = 0.3; // $M/turn per level gap
 
 // Trade routes
 const TRADE_ROUTE_COST             = 500;  // one-time $M treasury cost per route
