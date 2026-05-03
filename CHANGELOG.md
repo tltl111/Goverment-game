@@ -4,9 +4,82 @@ All notable changes to Government Simulator will be documented here.
 
 ---
 
-## [0.5.0] — 2026-04-26
+## [0.9.0] — 2026-05-03
 
-### Changed — Industry branch split (Phase 2.1)
+### Added — Infrastructure Megaprojects (Phase 2.7)
+- 7 empire-scale infrastructure projects added to the Projects tab under a new "Infrastructure Megaprojects" category:
+  - **National Highway Network** ($800M) — −10% infra decay, +0.5% GDP growth
+  - **National Rail Network** ($1,500M; requires Basic Automation) — −15% infra decay, +0.8% GDP growth
+  - **National Power Grid** ($2,000M; requires Basic Automation) — −20% infra decay, +1.2% GDP growth
+  - **National Airport Network** ($2,500M; requires Market Regulation or Banking System) — +10 effective Commerce level, +$100M/turn passive income
+  - **Seaport Expansion** ($2,000M; requires Banking System) — +25% all trade route income
+  - **Great Dam** ($3,000M; requires Green Industry) — +$200M/turn passive income, +1.0% GDP growth
+  - **Internet Infrastructure** ($4,500M; requires Digital Economy) — −25% infra decay, +1.5% GDP growth
+- Only 1 infrastructure megaproject may be funded at a time; selecting a new one cancels the previous
+- `getProjectEffects()` extended with 5 new effect types: `infraDecayMult`, `gdpGrowthBonus`, `passiveIncome`, `commerceLevelBonus`, `tradeIncomeMult`
+- `getTotalNetIncome()` now includes project passive income
+- `getTotalTradeIncome()` applies `tradeIncomeMult` from completed projects
+- `getEffectiveGrowthRate()` adds `pe.gdpGrowthBonus` and uses effective Commerce level (boosted by Airport Network)
+- Infra decay in `endTurn` and `getEffectivePolicyCost` both apply `pe.infraDecayMult`
+- Agricultural projects moved to the tech tree (Phase 3+) — better fit as research outcomes
+- Projects tab groups cards by category (`research` then `infrastructure`) with section headers
+- Array `techRequired` supported — Airport Network locks until either Market Regulation or Banking System is researched
+
+---
+
+## [0.8.0] — 2026-05-03
+
+### Added — Project framework + Research redesign (Phase 2.6)
+- **Research Centres removed** entirely; replaced by a `Research` policy (Science tab) that builds `G.researchLevel` (0 – ceiling)
+- `G.researchLevel` drives RP/turn: `researchLevel × 0.2 + educationBonus + techBonus`, modified by project speed multiplier
+- Tech cards show **"~N turns"** to complete instead of RP cost; calculated live from current RP/turn via `getTurnsToComplete()`
+- Research tab header shows "Research level X / ceiling" and RP/turn
+- **Three research projects** added (`PROJECTS` constant in `data.js`):
+  - **University** ($600M) — +25 research ceiling, +15% research speed
+  - **Research Institute** ($1,500M; requires Scientific Method) — +25 ceiling, +20% speed
+  - **Advanced Research Lab** ($3,000M; requires AI Administration) — +25 ceiling, −10% all tech costs
+- Project funding drains treasury directly each turn (separate from policy budget); `G.projectFunding` and `G.projectProgress` track state
+- `getResearchCapacityCeiling()` = base 50 + `researchCeilingBonus` from completed projects
+- `getProjectFundingTotal()` deducted from `getTotalNetIncome()`
+- Projects tab (renamed from Buildings) shows progress bars and funding inputs per project
+- Removed: `G.researchCentres`, `buildingResearchCentre`, `researchCentreBuildFraction`, research centre build UI and CSS
+
+---
+
+## [0.7.0] — 2026-05-03
+
+### Changed — Policy architecture refactor (Phase 2.5)
+- **All policies now build accumulated levels (0–100)** over time; no policy has an immediate proportional effect
+- New sector levels: `G.healthcareLevel`, `G.educationLevel`, `G.militaryLevel` (same growth model as economic sectors)
+- Healthcare/Education decay slowly (`SOCIAL_SECTOR_DECAY = 0.5` levels/turn); Military decays at full rate (`SECTOR_DECAY = 1.0`)
+- Effects come from levels, not current spending:
+  - `healthcareLevel` → population growth rate + happiness (max +25)
+  - `educationLevel` → GDP growth (max +1.5%), RP bonus (max +3), happiness (max +10)
+  - `militaryLevel` → `getMilitaryStrength()` (max 50, soft-capped by population) + happiness penalty (max −3)
+- Science policy tab added in index.html
+- `getEffectivePolicyCost()` added — mirrors endTurn refund logic so displayed costs match actual treasury deductions
+- `getTotalExpenses()` now sums effective costs; net income display corrected
+- Debt interest capped at `DEBT_INTEREST_MAX = 0.50` (50%/turn) to prevent runaway debt spirals
+- Removed: `policyEffectScale()`, `POLICY_REFERENCE_SPEND`, `G.militaryStrength`
+
+---
+
+## [0.6.0] — 2026-04-27
+
+### Added — Population system (Phase 2.2) + Trade routes as objects (Phases 2.3–2.4)
+- `G.population` (millions), `G.gdpPerCapita` (productivity index), `G.territoryScore`, `G.agriculturalFactor`, `G.populationCapTechFactor` added to state
+- GDP is now `population × gdpPerCapita / 1000`; `gdpPerCapita` grows at the effective growth rate each turn
+- Population cap: `territoryScore × BASE_TERRITORY_CAP × infraFactor × agriculturalFactor × populationCapTechFactor`
+- Population grows toward cap; rate driven by base + happiness + healthcare level; declines if overpopulated
+- Policy costs for Healthcare and Education scale sub-linearly with population
+- Military strength soft-capped by population manpower (`population × MILITARY_MANPOWER_RATIO`)
+- `G.tradeRoutes` changed from a count to an array of route objects `{ id, partnerId, maturity }`
+- Routes are free to open; maturity increments each turn; income ramps linearly from $0 to $15M/turn over 50 turns
+- Individual route close buttons; closing a route resets maturity to 0
+
+---
+
+
 - Replaced single `industry` policy and `G.industryLevel` with two new independent policies:
   - **Mining** (`G.miningLevel`) — +0.1% GDP growth at level 100
   - **Manufacturing** (`G.manufacturingLevel`) — effective output capped by Mining level; +0.2% GDP at effective level 100

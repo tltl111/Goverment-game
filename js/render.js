@@ -43,11 +43,15 @@ function renderHeader() {
 
   document.getElementById('gdp').textContent = '$' + G.gdp.toFixed(2) + 'B';
 
+  const popCap = getPopulationCap();
+  setStatValue('population', fmtPop(G.population),
+    G.population / popCap > 0.95 ? 'negative' : G.population / popCap > 0.80 ? 'warning' : 'positive');
+
   const happiness = G.happiness;
   setStatValue('approval', Math.round(happiness) + '%',
     happiness < 35 ? 'negative' : happiness < 50 ? 'warning' : 'positive');
 
-  const net = getNetIncome();
+  const net = getTotalNetIncome();
   setStatValue('net-income', (net >= 0 ? '+' : '') + fmt(net),
     net < 0 ? 'negative' : 'positive');
 }
@@ -71,7 +75,8 @@ function renderPolicies() {
   for (const [id, policy] of Object.entries(POLICIES)) {
     if (tab !== 'all' && policy.category !== tab) continue;
     const funding = G.policyFunding[id] || 0;
-    const cost = getPolicyCost(id);
+    const cost = getEffectivePolicyCost(id);
+    const allocated = getPolicyCost(id);
 
     html += `
       <div class="policy-card ${funding > 0 ? 'active' : ''}">
@@ -90,9 +95,9 @@ function renderPolicies() {
           <span class="policy-slider-pct">20%</span>
         </div>
         <div class="policy-slider-display" id="pd-${id}">
-          ${funding}% of income \u2014 ${cost > 0 ? fmt(cost) + '/turn' : 'Inactive'}
+          ${funding}% of income \u2014 ${allocated > 0 ? fmt(allocated) + '/turn allocated' : 'Inactive'}
         </div>
-        <div class="policy-effects-hint">${buildEffectsHint(id, policy.effects)}</div>
+        <div class="policy-effects-hint">${buildEffectsHint(id)}</div>
       </div>`;
   }
 
@@ -100,79 +105,21 @@ function renderPolicies() {
   updateBudgetProjection();
 }
 
-function buildEffectsHint(policyId, effects) {
-  if (policyId === 'infrastructure') {
-    const lvl         = G.infraLevel;
-    const income      = getTaxIncome();
-    const decay       = (income * INFRA_MAINTAIN_FRAC / (1 + INFRA_REPAIR_HARDNESS * lvl)).toFixed(1);
-    const maintainPct = (INFRA_MAINTAIN_FRAC * 100).toFixed(0);
-    const currentGdpPct = (effects.gdpGrowth * (lvl / 100) * 100).toFixed(2);
-    const lvlClass    = lvl < 20 ? 'effect-bad' : lvl < 50 ? 'effect-warn' : 'effect-good';
-    return [
-      `<span class="${lvlClass}">Level ${Math.round(lvl)}/100 → GDP +${currentGdpPct}%</span>`,
-      `<span class="effect-bad">−${decay} lvl/turn decay</span>`,
-      `<span class="effect-warn">~${maintainPct}% income to maintain</span>`,
-    ].join(' · ');
-  }
-  // Economic sector policies — show level, effect, decay, and net growth preview
-  if (policyId === 'mining' || policyId === 'manufacturing' || policyId === 'commerce' || policyId === 'finance') {
-    const levelKey = policyId + 'Level';
-    const lvl = G[levelKey];
-    const lvlClass = lvl < 20 ? 'effect-bad' : lvl < 50 ? 'effect-warn' : 'effect-good';
-    const funding = G.policyFunding[policyId] || 0;
-    let effectStr = '';
-    if (policyId === 'mining') {
-      effectStr = 'GDP +' + (0.001 * lvl / 100 * 100).toFixed(2) + '%';
-    }
-    if (policyId === 'manufacturing') {
-      const effectiveMfgLevel = Math.min(G.manufacturingLevel, G.miningLevel);
-      effectStr = 'Effective ' + Math.round(effectiveMfgLevel) + '/100 => GDP +' + (0.002 * effectiveMfgLevel / 100 * 100).toFixed(2) + '%';
-    }
-    if (policyId === 'commerce') {
-      const effectiveMfgLevel = Math.min(G.manufacturingLevel, G.miningLevel);
-      effectStr = 'GDP +' + (0.002 * (lvl / 100) * (0.5 + 0.5 * effectiveMfgLevel / 100) * 100).toFixed(2) + '%';
-    }
-    if (policyId === 'finance') {
-      const discount = (0.5 * lvl / 100 * 100).toFixed(0);
-      const slots = Math.floor(lvl / TRADE_ROUTE_LEVEL_NEEDED);
-      effectStr = 'Debt rate \u2212' + discount + '% · ' + slots + ' route slot' + (slots !== 1 ? 's' : '');
-    }
-    let netStr = '';
-    if (funding > 0) {
-      const spend    = getTaxIncome() * (funding / 100);
-      const growRate = SECTOR_GROW_PER_M / (1 + SECTOR_GROW_HARDNESS * lvl);
-      const net      = spend * growRate - SECTOR_DECAY;
-      netStr = ' · <span class="' + (net >= 0 ? 'effect-good' : 'effect-bad') + '">' + (net >= 0 ? '+' : '') + net.toFixed(1) + ' lvl/turn</span>';
-    } else {
-      netStr = ' · <span class="effect-bad">−' + SECTOR_DECAY.toFixed(1) + ' lvl/turn (unfunded)</span>';
-    }
-    let importWarning = '';
-    if (policyId === 'manufacturing' && G.manufacturingLevel > G.miningLevel) {
-      const importCost = (G.manufacturingLevel - G.miningLevel) * MANUFACTURING_IMPORT_COST_PER_LEVEL;
-      importWarning = ' · <span class="effect-bad">Import -' + importCost.toFixed(1) + ' $M/turn</span>';
-    }
-    return `<span class="${lvlClass}">Level ${Math.round(lvl)}/100 => ${effectStr}</span>${netStr}${importWarning}`;
-  }
-  // Show what effects would be at max funding given the current economy.
-  const maxScale = getTaxIncome() * 0.20 / POLICY_REFERENCE_SPEND;
-  const parts = [];
-  if (effects.happiness)         parts.push(span(Math.round(effects.happiness * maxScale), 'Happiness', ' @max'));
-  if (effects.gdpGrowth)         parts.push(spanPct(effects.gdpGrowth * maxScale, 'GDP growth', ' @max'));
-  if (effects.rpBonus)           parts.push(`<span class="effect-good">+${(effects.rpBonus * maxScale).toFixed(1)} bonus RP/centre @max</span>`);
-  if (effects.militaryStrength)  parts.push(`<span class="effect-good">+${Math.round(effects.militaryStrength * maxScale)} Mil @max</span>`);
-  return parts.join(' · ');
-}
-
-function span(val, label, suffix) {
-  const cls = val >= 0 ? 'effect-good' : 'effect-bad';
-  const sign = val >= 0 ? '+' : '';
-  return `<span class="${cls}">${label} ${sign}${val}${suffix || ''}</span>`;
-}
-
-function spanPct(val, label, suffix) {
-  const cls = val >= 0 ? 'effect-good' : 'effect-bad';
-  const sign = val >= 0 ? '+' : '';
-  return `<span class="${cls}">${label} ${sign}${(val * 100).toFixed(1)}%${suffix || ''}</span>`;
+function buildEffectsHint(policyId) {
+  const tags = {
+    infrastructure:  [['↑ Infra level', 'good'], ['↑ GDP growth', 'good'], ['↑ pop cap', 'good']],
+    mining:          [['↑ Mining level', 'good'], ['↑ GDP growth', 'good']],
+    manufacturing:   [['↑ Mfg level', 'good'], ['↑ GDP growth', 'good'], ['capped by Mining', 'neutral']],
+    commerce:        [['↑ Commerce level', 'good'], ['↑ GDP growth', 'good'], ['amplified by Mfg', 'neutral']],
+    finance:         [['↑ Finance level', 'good'], ['↓ debt cost', 'good']],
+    healthcare:      [['↑ Healthcare level', 'good'], ['↑ pop growth', 'good'], ['↑ happiness', 'good']],
+    education:       [['↑ Education level', 'good'], ['↑ GDP growth', 'good'], ['↑ research speed', 'good'], ['↑ happiness', 'good']],
+    military:        [['↑ Military level', 'good'], ['↓ happiness', 'bad']],
+    research:        [['↑ Research level', 'good'], ['↑ RP/turn', 'good'], ['↑ tech speed', 'good']],
+  };
+  return (tags[policyId] || [])
+    .map(([label, type]) => `<span class="effect-tag effect-tag-${type}">${label}</span>`)
+    .join('');
 }
 
 function renderDashboard() {
@@ -180,7 +127,7 @@ function renderDashboard() {
 
   if (tab === 'overview') {
     const happiness = G.happiness;
-    const net = getNetIncome();
+    const net = getTotalNetIncome();
     const growth = getEffectiveGrowthRate();
     const rp = getRpPerTurn();
     const activeResearchName = G.activeResearch ? TECHNOLOGIES[G.activeResearch].name : 'None';
@@ -192,7 +139,8 @@ function renderDashboard() {
     const treasuryInterestUnit = tRate > 0
       ? ' (' + (treasuryInterestRaw >= 0 ? '+' : '') + fmt(treasuryInterestRaw) + '/turn, ' + (tRate * 100).toFixed(2) + '%)' : '';
 
-    const gdpChange = G.gdp * growth;
+    const popRate = getPopulationGrowthRate();
+    const gdpChange = G.gdp * (growth + popRate);
     const gdpChangeStr = (gdpChange >= 0 ? '+' : '') + '$' + (Math.abs(gdpChange) < 1 ? Math.abs(gdpChange).toFixed(3) : Math.abs(gdpChange).toFixed(2)) + 'B';
 
     // Happiness next-turn delta preview
@@ -207,9 +155,7 @@ function renderDashboard() {
       const infraDecay = getTaxIncome() * INFRA_MAINTAIN_FRAC / (1 + INFRA_REPAIR_HARDNESS * G.infraLevel) * _te.infraDecayMult;
       if (G.policyFunding.infrastructure > 0) {
         const totalInfraSpend = getTaxIncome() * (G.policyFunding.infrastructure / 100);
-        const repairSpend = G.buildingResearchCentre
-          ? totalInfraSpend * (1 - G.researchCentreBuildFraction / 100)
-          : totalInfraSpend;
+        const repairSpend = totalInfraSpend;
         const repairRate = INFRA_REPAIR_PER_M / (1 + INFRA_REPAIR_HARDNESS * G.infraLevel) * _te.infraGrowthMult;
         const infraUnclamped = G.infraLevel + repairSpend * repairRate - infraDecay;
         infraDelta = Math.min(100, Math.max(0, infraUnclamped)) - G.infraLevel;
@@ -223,18 +169,23 @@ function renderDashboard() {
       { label: 'Happiness',         value: (happiness >= 0 ? '+' : '') + Math.round(happiness), unit: '% (' + happinessDeltaStr + '/turn)',   max: 100, type: happiness < 30 ? 'neg' : happiness < 50 ? 'warn' : 'pos' },
       { label: 'Treasury',          value: (G.treasury >= 0 ? '+' : '') + fmt(G.treasury),    unit: treasuryInterestUnit,    max: 100, rawPct: Math.min(100, Math.max(0, (G.treasury + 8000) / 160)), type: G.treasury < 0 ? 'neg' : G.treasury < 2000 ? 'warn' : 'pos' },
       { label: 'GDP',               value: '$' + G.gdp.toFixed(2) + 'B', unit: ' (' + gdpChangeStr + '/turn)', max: 100, rawPct: Math.min(100, G.gdp / 20), type: growth < 0 ? 'neg' : 'pos' },
+      { label: 'GDP per Capita',     value: Math.round(G.gdpPerCapita).toLocaleString(), unit: ' index', max: 100, rawPct: Math.min(100, G.gdpPerCapita / 20), type: growth < 0 ? 'neg' : growth < 0.005 ? 'warn' : 'pos' },
+      { label: 'Population',         value: fmtPop(G.population), unit: ' / ' + fmtPop(getPopulationCap()) + ' cap', max: 100, rawPct: Math.min(100, (G.population / getPopulationCap()) * 100), type: G.population / getPopulationCap() > 0.95 ? 'neg' : G.population / getPopulationCap() > 0.80 ? 'warn' : 'pos' },
+      { label: 'Pop Growth / Turn',  value: (popRate >= 0 ? '+' : '') + (popRate * 100).toFixed(3) + '%', unit: '', max: 100, rawPct: Math.min(100, popRate * 3333), type: popRate < 0 ? 'neg' : popRate < 0.002 ? 'warn' : 'pos' },
       { label: 'GDP Growth / Year', value: (growth >= 0 ? '+' : '') + (growth * 100).toFixed(2) + '%', unit: '', max: 100, rawPct: Math.min(100, growth * 500), type: growth < 0 ? 'neg' : growth < 0.01 ? 'warn' : 'pos' },
       { label: 'Infra Level',        value: Math.round(G.infraLevel) + '/100', unit: ' (' + infraDeltaStr + '/turn)', max: 100, rawPct: G.infraLevel, type: G.infraLevel < 20 ? 'neg' : G.infraLevel < 50 ? 'warn' : 'pos' },
       { label: 'Mining Level',         value: Math.round(G.miningLevel) + '/100',         unit: ' (GDP +' + (0.001 * G.miningLevel / 100 * 100).toFixed(2) + '%)',                                                                                                            max: 100, rawPct: G.miningLevel,         type: G.miningLevel < 20 ? 'neg' : G.miningLevel < 50 ? 'warn' : 'pos' },
       { label: 'Manufacturing Level',  value: Math.round(G.manufacturingLevel) + '/100',  unit: (() => { const eff = Math.min(G.manufacturingLevel, G.miningLevel); return ' (GDP +' + (0.002 * eff / 100 * 100).toFixed(2) + '%)' + (G.manufacturingLevel > G.miningLevel ? ' \u26a0 Mining' : ''); })(), max: 100, rawPct: G.manufacturingLevel,  type: G.manufacturingLevel < 20 ? 'neg' : G.manufacturingLevel < 50 ? 'warn' : 'pos' },
       { label: 'Commerce Level',       value: Math.round(G.commerceLevel) + '/100',       unit: ' (GDP +' + (0.002 * (G.commerceLevel / 100) * (0.5 + 0.5 * Math.min(G.manufacturingLevel, G.miningLevel) / 100) * 100).toFixed(2) + '%)', max: 100, rawPct: G.commerceLevel,       type: G.commerceLevel < 20 ? 'neg' : G.commerceLevel < 50 ? 'warn' : 'pos' },
-      { label: 'Finance Level',     value: Math.round(G.financeLevel) + '/100', unit: ' (' + getTradeRouteSlots() + ' route slots)', max: 100, rawPct: G.financeLevel, type: G.financeLevel < 20 ? 'neg' : G.financeLevel < 50 ? 'warn' : 'pos' },
-      { label: 'Trade Routes',      value: G.tradeRoutes + '/' + getTradeRouteSlots(), unit: G.tradeRoutes > 0 ? ' (+' + fmt(G.tradeRoutes * getTradeRouteIncomePerRoute()) + '/turn)' : '', max: 100, rawPct: getTradeRouteSlots() > 0 ? (G.tradeRoutes / getTradeRouteSlots()) * 100 : 0, type: G.tradeRoutes === 0 ? 'warn' : 'pos' },
+      { label: 'Finance Level',     value: Math.round(G.financeLevel) + '/100', unit: ' (↓ debt cost)', max: 100, rawPct: G.financeLevel, type: G.financeLevel < 20 ? 'neg' : G.financeLevel < 50 ? 'warn' : 'pos' },
+      { label: 'Healthcare Level',   value: Math.round(G.healthcareLevel) + '/100', unit: ' (pop growth +' + (POP_GROWTH_HEALTHCARE_SCALE * G.healthcareLevel / 100 * 100).toFixed(2) + '%/turn)', max: 100, rawPct: G.healthcareLevel, type: G.healthcareLevel < 20 ? 'neg' : G.healthcareLevel < 50 ? 'warn' : 'pos' },
+      { label: 'Education Level',    value: Math.round(G.educationLevel) + '/100', unit: ' (GDP +' + (EDUCATION_GDP_GROWTH_MAX * G.educationLevel / 100 * 100).toFixed(2) + '%)', max: 100, rawPct: G.educationLevel, type: G.educationLevel < 20 ? 'neg' : G.educationLevel < 50 ? 'warn' : 'pos' },
+      { label: 'Trade Routes',      value: G.tradeRoutes.length, unit: G.tradeRoutes.length > 0 ? ' active (+' + fmt(getTotalTradeIncome()) + '/turn)' : ' active', max: 100, rawPct: Math.min(100, G.tradeRoutes.length * 20), type: G.tradeRoutes.length === 0 ? 'warn' : 'pos' },
       { label: 'Net Income / Turn', value: (net >= 0 ? '+' : '') + fmt(net), unit: '', max: 100, rawPct: Math.min(100, Math.max(0, (net + 2000) / 40)), type: net < 0 ? 'neg' : 'pos' },
-      { label: 'Research Centres',  value: G.researchCentres,  unit: '',    max: 100, rawPct: Math.min(100, G.researchCentres * 10), type: 'pos' },
+      { label: 'Research Level',   value: G.researchLevel.toFixed(1) + ' / ' + getResearchCapacityCeiling(), unit: '', max: 100, rawPct: Math.min(100, (G.researchLevel / getResearchCapacityCeiling()) * 100), type: G.researchLevel === 0 ? 'warn' : 'pos' },
       { label: 'Research Output',   value: '+' + rp.toFixed(1),      unit: ' RP/turn', max: 100, rawPct: Math.min(100, rp * 3), type: rp === 0 ? 'warn' : 'pos' },
       { label: 'Active Research',   value: activeResearchName, unit: '', max: 100, rawPct: activeResearchPct, type: G.activeResearch ? 'pos' : 'warn' },
-      { label: 'Military Strength', value: (G.militaryStrength >= 0 ? '+' : '') + Math.round(G.militaryStrength), unit: '',    max: 100, rawPct: Math.min(100, G.militaryStrength * 2), type: 'pos' },
+      { label: 'Military Level',    value: Math.round(G.militaryLevel) + '/100', unit: ' (strength ' + Math.round(getMilitaryStrength()) + ' / ' + Math.round(G.population * MILITARY_MANPOWER_RATIO) + ' cap)', max: 100, rawPct: G.militaryLevel, type: G.militaryLevel === 0 ? 'warn' : 'pos' },
     ];
 
     const barClass = t => t === 'neg' ? 'bar-red' : t === 'warn' ? 'bar-yellow' : 'bar-green';
@@ -267,29 +218,46 @@ function renderDashboard() {
   }
 
   if (tab === 'trade-routes') {
-    const slots   = getTradeRouteSlots();
-    const income  = getTradeRouteIncomePerRoute();
-    const canOpen = G.tradeRoutes < slots && G.treasury >= TRADE_ROUTE_COST;
-    const canClose = G.tradeRoutes > 0;
-    const slotsColor = slots === 0 ? 'var(--text-3)' : 'var(--teal)';
-    const routeIncomeTotal = G.tradeRoutes > 0 ? ' · +' + fmt(G.tradeRoutes * income) + '/turn' : '';
+    const count   = G.tradeRoutes.length;
+    const totalIncome = getTotalTradeIncome();
+    const routeIncomeTotal = count > 0 ? ' · +' + fmt(totalIncome) + '/turn' : '';
+
+    let routeListHtml = '';
+    if (count === 0) {
+      routeListHtml = '<div class="tr-empty">No active routes. Open one to start earning trade income.</div>';
+    } else {
+      for (const route of G.tradeRoutes) {
+        const routeIncome = getTradeRouteIncome(route);
+        const maturityPct = Math.min(100, (route.maturity / TRADE_ROUTE_MATURITY_TURNS) * 100).toFixed(0);
+        routeListHtml += `
+          <div class="tr-route-card">
+            <div class="tr-route-info">
+              <span class="tr-route-id">Route #${route.id}</span>
+              <span class="tr-route-partner">Partner: <em>TBD</em></span>
+              <span class="tr-route-age">${route.maturity} turn${route.maturity !== 1 ? 's' : ''} old · ${maturityPct}% mature</span>
+            </div>
+            <div class="tr-route-right">
+              <span class="tr-route-income">+${fmt(routeIncome)}/turn</span>
+              <button class="btn-tr-close-route" onclick="closeTradeRoute(${route.id})">✕</button>
+            </div>
+          </div>`;
+      }
+    }
+
     document.getElementById('tab-trade-routes').innerHTML = `
       <div class="trade-routes-card">
         <div class="tr-header">
           <span class="tr-icon">🚢</span>
           <span class="tr-title">Trade Routes</span>
-          <span class="tr-slots" style="color:${slotsColor}">${G.tradeRoutes}/${slots} active${routeIncomeTotal}</span>
+          <span class="tr-slots">${count} active${routeIncomeTotal}</span>
         </div>
-        <p class="tr-desc">Each route costs <strong>${fmt(TRADE_ROUTE_COST)}</strong> treasury to open and earns <strong>+${fmt(income)}/turn</strong> (scales with Finance level). Unlock route slots by raising Finance to level ${TRADE_ROUTE_LEVEL_NEEDED}, ${TRADE_ROUTE_LEVEL_NEEDED * 2}, ${TRADE_ROUTE_LEVEL_NEEDED * 3}…</p>
+        <p class="tr-desc">Routes are free to open. Income ramps from $0 to <strong>+${fmt(TRADE_ROUTE_INCOME_MAX)}/turn</strong> over ${TRADE_ROUTE_MATURITY_TURNS} turns as the route matures. Closing a route resets its maturity.</p>
         <div class="tr-actions">
-          <button class="btn-tr-open${canOpen ? '' : ' disabled'}" onclick="openTradeRoute()" ${canOpen ? '' : 'disabled'}>
-            Open Route (−${fmt(TRADE_ROUTE_COST)})
-          </button>
-          <button class="btn-tr-close${canClose ? '' : ' disabled'}" onclick="closeTradeRoute()" ${canClose ? '' : 'disabled'}>
-            Close Route
+          <button class="btn-tr-open" onclick="openTradeRoute()">
+            Open Route
           </button>
         </div>
-        ${slots === 0 ? '<div class="tr-hint">Raise Finance level to ' + TRADE_ROUTE_LEVEL_NEEDED + ' to unlock your first route slot.</div>' : ''}
+        <div class="tr-route-list">${routeListHtml}</div>
       </div>`;
   }
 
@@ -328,23 +296,30 @@ function renderDashboard() {
       return d > 0 ? '<span class="stat-pos">▲' + d.toFixed(1) + '</span>' : '<span class="stat-neg">▼' + Math.abs(d).toFixed(1) + '</span>';
     };
     const sectors = [
-      { label: 'Infrastructure', key: 'infraLevel',         color: 'var(--blue)' },
-      { label: 'Mining',         key: 'miningLevel',         color: 'var(--yellow)' },
-      { label: 'Manufacturing',  key: 'manufacturingLevel',  color: 'var(--orange)' },
-      { label: 'Commerce',       key: 'commerceLevel',       color: 'var(--teal)' },
-      { label: 'Finance',        key: 'financeLevel',        color: 'var(--green)' },
+      { label: 'Population',     key: 'population',        color: 'var(--teal)',   fmt: v => fmtPop(v) },
+      { label: 'Infrastructure', key: 'infraLevel',         color: 'var(--blue)',   fmt: v => v.toFixed(1) + '/100' },
+      { label: 'Mining',         key: 'miningLevel',         color: 'var(--yellow)', fmt: v => v.toFixed(1) + '/100' },
+      { label: 'Manufacturing',  key: 'manufacturingLevel',  color: 'var(--orange)', fmt: v => v.toFixed(1) + '/100' },
+      { label: 'Commerce',       key: 'commerceLevel',       color: 'var(--teal)',   fmt: v => v.toFixed(1) + '/100' },
+      { label: 'Finance',        key: 'financeLevel',        color: 'var(--green)',  fmt: v => v.toFixed(1) + '/100' },
+      { label: 'Healthcare',     key: 'healthcareLevel',     color: 'var(--red)',    fmt: v => v.toFixed(1) + '/100' },
+      { label: 'Education',      key: 'educationLevel',      color: 'var(--blue)',   fmt: v => v.toFixed(1) + '/100' },
+      { label: 'Military',       key: 'militaryLevel',       color: 'var(--orange)', fmt: v => v.toFixed(1) + '/100' },
+      { label: 'Research',       key: 'researchLevel',       color: 'var(--teal)',   fmt: v => v.toFixed(1) + '/' + getResearchCapacityCeiling() },
     ];
     let sectorRows = '';
     for (const sec of sectors) {
-      const val = latest ? latest[sec.key] : 0;
-      const pct = val.toFixed(0);
+      const val = latest ? (latest[sec.key] || 0) : 0;
+      const capVal = sec.key === 'population' && latest ? (latest.populationCap || getPopulationCap()) : 100;
+      const pct = (val / capVal * 100).toFixed(0);
+      const displayVal = sec.fmt ? sec.fmt(val) : val.toFixed(0) + '/100';
       sectorRows += `
         <div class="stat-sector-row">
           <span class="stat-sector-label">${sec.label}</span>
           <div class="stat-sector-bar-bg">
             <div class="stat-sector-bar-fill" style="width:${pct}%;background:${sec.color}"></div>
           </div>
-          <span class="stat-sector-val">${pct}/100 ${sectorDelta(sec.key)}</span>
+          <span class="stat-sector-val">${displayVal} ${sectorDelta(sec.key)}</span>
         </div>`;
     }
 
@@ -354,7 +329,8 @@ function renderDashboard() {
       researchRows = '<div class="stat-empty">No data yet.</div>';
     } else {
       const techCount = latest.unlockedTechs;
-      const centres = latest.researchCentres;
+      const resLevel  = G.researchLevel;
+      const ceiling   = getResearchCapacityCeiling();
       const rp = getRpPerTurn();
       const activeLabel = G.activeResearch ? TECHNOLOGIES[G.activeResearch].name : '—';
       const activeCost = G.activeResearch ? getTechCost(G.activeResearch) : 0;
@@ -362,8 +338,8 @@ function renderDashboard() {
       researchRows = `
         <div class="stat-research-grid">
           <div class="stat-research-item">
-            <div class="stat-research-label">Research Centres</div>
-            <div class="stat-research-val">${centres}</div>
+            <div class="stat-research-label">Research Level</div>
+            <div class="stat-research-val">${resLevel.toFixed(1)} / ${ceiling}</div>
           </div>
           <div class="stat-research-item">
             <div class="stat-research-label">RP / Turn</div>
@@ -413,10 +389,11 @@ function renderDashboard() {
 
   if (tab === 'research') {
     const rp = getRpPerTurn();
+    const ceiling = getResearchCapacityCeiling();
     const tiers = [1, 2, 3, 4];
     let html = `
       <div class="research-tab-header">
-        <span class="research-tab-stat">🏗️ ${G.researchCentres} centre${G.researchCentres !== 1 ? 's' : ''}</span>
+        <span class="research-tab-stat">🔬 Research level ${G.researchLevel.toFixed(1)} / ${ceiling}</span>
         <span class="research-tab-stat">+${rp.toFixed(1)} RP/turn</span>
       </div>
       <div class="research-tab-tree">`;
@@ -432,6 +409,7 @@ function renderDashboard() {
         const available     = !unlocked && reqMet;
         const effectiveCost = getTechCost(id);
         const progressPct   = isActive ? Math.min(100, (G.researchProgress / effectiveCost) * 100).toFixed(1) : 0;
+        const turnsLeft     = isActive ? getTurnsToComplete(id) : (rp > 0 ? getTurnsToComplete(id) : null);
 
         let cls = 'tech-card ';
         if (unlocked)           cls += 'tech-unlocked';
@@ -446,22 +424,28 @@ function renderDashboard() {
 
         let actionHtml = '';
         if (isActive) {
+          const turnsRemaining = getTurnsToComplete(id);
+          const turnsLabel = isFinite(turnsRemaining) ? '~' + turnsRemaining + ' turns left' : '—';
           actionHtml = `
             <div class="tech-progress-wrap">
               <div class="tech-progress-bar-bg"><div class="tech-progress-bar-fill" style="width:${progressPct}%"></div></div>
-              <div class="tech-progress-label">${Math.floor(G.researchProgress)} / ${effectiveCost} RP</div>
+              <div class="tech-progress-label">${progressPct}% &nbsp;·&nbsp; ${turnsLabel}</div>
             </div>
             <button class="btn-cancel-research" onclick="setActiveResearch('${id}')">Cancel</button>`;
         } else if (available && !busyElsewhere) {
           actionHtml = `<button class="btn-start-research" onclick="setActiveResearch('${id}')">&#128300; Research</button>`;
         }
 
+        const costDisplay = unlocked ? '✓ Unlocked'
+          : isActive ? ''
+          : (turnsLeft !== null ? '~' + turnsLeft + ' turns' : 'Fund Research first');
+
         html += `
           <div class="${cls}" title="${tech.description}">
             <span class="tech-icon">${tech.icon}</span>
             <div class="tech-info">
               <div class="tech-name">${tech.name}</div>
-              <div class="tech-cost">${unlocked ? '✓ Unlocked' : effectiveCost + ' RP needed'}</div>
+              <div class="tech-cost">${costDisplay}</div>
               <div class="tech-effect">${tech.effects.effectDesc}</div>
               ${reqText}
               ${actionHtml}
@@ -477,50 +461,104 @@ function renderDashboard() {
   }
 
   if (tab === 'buildings') {
-    const infraFunded     = G.policyFunding.infrastructure > 0;
-    const totalInfraSpend = getTaxIncome() * (G.policyFunding.infrastructure / 100);
-    const buildFrac       = G.researchCentreBuildFraction / 100;
-    const buildSpendPT    = totalInfraSpend * buildFrac;
-    const progressPct     = Math.min(100, (G.researchCentreBuildProgress / RESEARCH_CENTRE_BUILD_COST) * 100).toFixed(1);
-    const turnsLeft       = (buildSpendPT > 0 && G.buildingResearchCentre)
-      ? Math.ceil((RESEARCH_CENTRE_BUILD_COST - G.researchCentreBuildProgress) / buildSpendPT)
-      : '—';
+    // Group projects by category for display
+    const categoryOrder  = ['research', 'infrastructure'];
+    const categoryLabels = { research: 'Research Projects', infrastructure: 'Infrastructure Megaprojects' };
+    const categorySubs   = {
+      research:       'Direct treasury investments \u00b7 raises Research capacity ceiling',
+      infrastructure: 'Direct treasury investments \u00b7 permanent empire-wide effects',
+    };
 
-    const toggleCls   = G.buildingResearchCentre ? 'btn-toggle-research-centre active' : 'btn-toggle-research-centre';
-    const toggleLabel = G.buildingResearchCentre ? 'Building…' : 'Build';
-    const hint = !infraFunded && !G.buildingResearchCentre
-      ? '<div class="build-research-centre-hint">Requires infrastructure funding</div>' : '';
+    const grouped = {};
+    for (const [id, proj] of Object.entries(PROJECTS)) {
+      const cat = proj.category || 'other';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push([id, proj]);
+    }
 
-    const splitSliderHtml = G.buildingResearchCentre ? `
-      <div class="build-split-row">
-        <label class="build-split-label">Construction split</label>
-        <div class="build-split-controls">
-          <span class="build-split-val">Repair ${100 - G.researchCentreBuildFraction}%</span>
-          <input type="range" min="0" max="100" step="5" value="${G.researchCentreBuildFraction}"
-            oninput="setResearchCentreBuildFraction(this.value)" class="build-split-slider">
-          <span class="build-split-val">Build ${G.researchCentreBuildFraction}%</span>
-        </div>
-        <div class="build-split-hint">+$${Math.round(buildSpendPT)}M/turn to construction · +$${Math.round(totalInfraSpend - buildSpendPT)}M/turn to repair</div>
-      </div>` : '';
+    let sectionsHtml = '';
+    // Determine which infra project (if any) is currently being funded
+    const activeInfraId = Object.keys(G.projectFunding).find(
+      id => PROJECTS[id] && PROJECTS[id].category === 'infrastructure' && G.projectFunding[id] > 0
+    ) || null;
 
-    const progressHtml = G.buildingResearchCentre ? `
-      <div class="build-progress-wrap">
-        <div class="build-progress-bar-bg"><div class="build-progress-bar-fill" style="width:${progressPct}%"></div></div>
-        <div class="build-progress-label">$${Math.floor(G.researchCentreBuildProgress)}M / $${RESEARCH_CENTRE_BUILD_COST}M &nbsp;·&nbsp; ~${turnsLeft} turns left</div>
-      </div>` : '';
+    for (const cat of categoryOrder) {
+      if (!grouped[cat]) continue;
+      let cardsHtml = '';
+      for (const [id, proj] of grouped[cat]) {
+        const completed = G.completedProjects.includes(id);
+        const progress  = G.projectProgress[id] || 0;
+        const pct       = completed ? 100 : Math.min(100, (progress / proj.cost) * 100);
+        const funding   = G.projectFunding[id] || 0;
+
+        // Support array or string techRequired
+        const techReq = proj.techRequired;
+        let locked   = false;
+        let techName = null;
+        if (techReq) {
+          if (Array.isArray(techReq)) {
+            locked   = !techReq.some(t => G.unlockedTechs.includes(t));
+            techName = techReq.map(t => TECHNOLOGIES[t].name).join(' or ');
+          } else {
+            locked   = !G.unlockedTechs.includes(techReq);
+            techName = TECHNOLOGIES[techReq].name;
+          }
+        }
+
+        // Infra projects are blocked when a different infra project is already active
+        const infraBlocked = !completed && !locked && proj.category === 'infrastructure'
+          && activeInfraId !== null && activeInfraId !== id;
+
+        const turnsLeft = (!completed && !locked && funding > 0)
+          ? Math.ceil((proj.cost - progress) / funding) : null;
+
+        const cardCls = 'project-card' + (completed ? ' project-complete' : locked ? ' project-locked' : funding > 0 ? ' project-active' : '');
+
+        const progressBar = `
+          <div class="project-progress-wrap">
+            <div class="project-progress-bar-bg">
+              <div class="project-progress-bar-fill" style="width:${pct}%"></div>
+            </div>
+            <div class="project-progress-label">
+              ${completed ? 'Complete' : ('$' + Math.floor(progress) + 'M / $' + proj.cost + 'M' + (turnsLeft !== null ? ' \u00b7 ~' + turnsLeft + ' turns' : ''))}
+            </div>
+          </div>`;
+
+        const fundingHtml = completed ? '' : locked
+          ? `<div class="project-locked-reason">Requires: ${techName}</div>`
+          : infraBlocked
+          ? `<div class="project-locked-reason">Another megaproject is in progress</div>`
+          : `<div class="project-funding-row">
+              <label class="project-funding-label">$/turn investment:</label>
+              <input type="number" class="project-funding-input" min="0" step="10" value="${funding}"
+                onchange="setProjectFunding('${id}', this.value)">
+            </div>`;
+
+        cardsHtml += `
+          <div class="${cardCls}">
+            <div class="project-header">
+              <span class="project-icon">${proj.icon}</span>
+              <span class="project-name">${proj.name}</span>
+              ${completed ? '<span class="project-badge-done">\u2713 Done</span>' : (locked ? '<span class="project-badge-locked">\ud83d\udd12 Locked</span>' : '')}
+            </div>
+            <p class="project-desc">${proj.description}</p>
+            <div class="project-effect">${proj.effects.effectDesc}</div>
+            ${progressBar}
+            ${fundingHtml}
+          </div>`;
+      }
+
+      sectionsHtml += `
+        <div class="projects-section">
+          <div class="projects-header">
+            <span class="projects-title">${categoryLabels[cat] || cat}</span>
+            <span class="projects-sub">${categorySubs[cat] || ''}</span>
+          </div>
+          ${cardsHtml}
+        </div>`;
+    }
 
     document.getElementById('tab-buildings').innerHTML = `
-      <div class="buildings-tab-panel">
-        <div class="build-research-centre-row">
-          <div class="build-research-centre-info">
-            <span class="build-research-centre-title">🏗️ Research Centre</span>
-            <span class="build-research-centre-sub">Split infra budget between construction and repair · $${RESEARCH_CENTRE_BUILD_COST}M total</span>
-          </div>
-          <button class="${toggleCls}" onclick="toggleBuildResearchCentre()">${toggleLabel}</button>
-        </div>
-        ${splitSliderHtml}
-        ${progressHtml}
-        ${hint}
-      </div>`;
+      <div class="projects-panel">${sectionsHtml}</div>`;
   }
 }

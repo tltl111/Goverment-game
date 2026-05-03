@@ -2,8 +2,7 @@
 // DATA — static game data: policy and technology definitions
 // ============================================================
 
-// Effects are the values achieved at $220M spending (baseline full funding).
-// Actual effect = effect × (actualSpending / POLICY_REFERENCE_SPEND).
+// Policy effects now come from accumulated levels, not from current spending (see Phase 2.5).
 const POLICIES = {
   mining: {
     id: 'mining',
@@ -55,27 +54,36 @@ const POLICIES = {
     name: 'Healthcare',
     category: 'social',
     icon: '🏥',
-    description: 'Fund hospitals and public health programs.',
+    description: 'Fund hospitals and public health programs. Builds Healthcare level, increasing population growth rate and happiness.',
     maxFunding: 20,
-    effects: { happiness: 25 }
+    effects: {}
   },
   education: {
     id: 'education',
     name: 'Education',
     category: 'social',
     icon: '🎓',
-    description: 'Fund schools and universities to develop human capital.',
+    description: 'Fund schools and universities. Builds Education level, boosting GDP growth, research speed, and happiness.',
     maxFunding: 20,
-    effects: { rpBonus: 3, gdpGrowth: 0.015, happiness: 10 }
+    effects: {}
   },
   military: {
     id: 'military',
     name: 'Military',
     category: 'security',
     icon: '⚔️',
-    description: 'Armed forces for national defense. (War system coming soon!)',
+    description: 'Fund armed forces. Builds Military level, increasing national defence strength. High military levels have a small happiness cost.',
     maxFunding: 20,
-    effects: { militaryStrength: 50, happiness: -3 }
+    effects: {}
+  },
+  research: {
+    id: 'research',
+    name: 'Research',
+    category: 'science',
+    icon: '🔬',
+    description: 'Fund scientific research programmes. Builds Research level, increasing technology research speed. Research projects raise the capacity ceiling.',
+    maxFunding: 20,
+    effects: {}
   },
 };
 
@@ -226,3 +234,112 @@ const TECHNOLOGIES = {
     effects: { gdpGrowthBonus: 0.005, infraGrowthMult: 1.20, effectDesc: '+0.5% GDP growth, +20% infrastructure growth rate' }
   },
 };
+
+// ============================================================
+// PROJECTS — large discrete investments built with direct treasury spend
+// Each project has a total cost ($M), and completing it grants a permanent effect.
+// Progress is tracked in G.projectProgress[id]; G.projectFunding[id] = $/turn allocation.
+// ============================================================
+const PROJECTS = {
+  // --- Research Projects ---
+  university: {
+    id: 'university',
+    name: 'University',
+    category: 'research',
+    icon: '🏫',
+    description: 'Build a national university system. Raises the research capacity ceiling and boosts research speed.',
+    cost: 600,
+    techRequired: null,
+    effects: { researchCeilingBonus: 25, researchSpeedMult: 1.15, effectDesc: '+25 research capacity ceiling, +15% research speed' }
+  },
+  researchInstitute: {
+    id: 'researchInstitute',
+    name: 'Research Institute',
+    category: 'research',
+    icon: '🔬',
+    description: 'Establish a dedicated national research institute. Further raises the research ceiling and accelerates research.',
+    cost: 1500,
+    techRequired: 'scientificMethod',
+    effects: { researchCeilingBonus: 25, researchSpeedMult: 1.20, effectDesc: '+25 research capacity ceiling, +20% research speed' }
+  },
+  advancedResearchLab: {
+    id: 'advancedResearchLab',
+    name: 'Advanced Research Lab',
+    category: 'research',
+    icon: '⚗️',
+    description: 'Build cutting-edge research laboratories. Further raises the ceiling and reduces all technology costs.',
+    cost: 3000,
+    techRequired: 'aiAdministration',
+    effects: { researchCeilingBonus: 25, techCostMult: 0.90, effectDesc: '+25 research capacity ceiling, −10% all tech costs' }
+  },
+  // --- Infrastructure Megaprojects ---
+  nationalHighwayNetwork: {
+    id: 'nationalHighwayNetwork',
+    name: 'National Highway Network',
+    category: 'infrastructure',
+    icon: '\uD83D\uDEE3\uFE0F',
+    description: 'Connect every city and region with a modern highway network, reducing infrastructure maintenance costs and boosting economic activity.',
+    cost: 800,
+    techRequired: null,
+    effects: { infraDecayMult: 0.90, gdpGrowthBonus: 0.005, effectDesc: '\u221210% infra decay rate, +0.5% GDP growth' }
+  },
+  nationalRailNetwork: {
+    id: 'nationalRailNetwork',
+    name: 'National Rail Network',
+    category: 'infrastructure',
+    icon: '\uD83D\uDE82',
+    description: 'Build an empire-wide rail system for mass transit and freight, reducing infrastructure upkeep and stimulating economic growth.',
+    cost: 1500,
+    techRequired: 'basicAutomation',
+    effects: { infraDecayMult: 0.85, gdpGrowthBonus: 0.008, effectDesc: '\u221215% infra decay rate, +0.8% GDP growth' }
+  },
+  nationalPowerGrid: {
+    id: 'nationalPowerGrid',
+    name: 'National Power Grid',
+    category: 'infrastructure',
+    icon: '\u26A1',
+    description: 'Electrify the entire empire with a centralised power grid. Major reduction in infrastructure decay and significant GDP uplift.',
+    cost: 2000,
+    techRequired: 'basicAutomation',
+    effects: { infraDecayMult: 0.80, gdpGrowthBonus: 0.012, effectDesc: '\u221220% infra decay rate, +1.2% GDP growth' }
+  },
+  nationalAirportNetwork: {
+    id: 'nationalAirportNetwork',
+    name: 'National Airport Network',
+    category: 'infrastructure',
+    icon: '\u2708\uFE0F',
+    description: 'Build a network of international and regional airports, connecting the empire to global commerce and generating passive revenue.',
+    cost: 2500,
+    techRequired: ['marketRegulation', 'bankingSystem'],
+    effects: { commerceLevelBonus: 10, passiveIncome: 100, effectDesc: '+10 effective Commerce level, +$100M/turn passive income' }
+  },
+  seaportExpansion: {
+    id: 'seaportExpansion',
+    name: 'Seaport Expansion',
+    category: 'infrastructure',
+    icon: '\u2693',
+    description: 'Expand and modernise seaports empire-wide, significantly boosting all trade route income.',
+    cost: 2000,
+    techRequired: 'bankingSystem',
+    effects: { tradeIncomeMult: 1.25, effectDesc: '+25% all trade route income' }
+  },
+  greatDam: {
+    id: 'greatDam',
+    name: 'Great Dam',
+    category: 'infrastructure',
+    icon: '\uD83C\uDF0A',
+    description: 'Construct a massive hydroelectric dam providing clean energy and a large source of passive income to the treasury.',
+    cost: 3000,
+    techRequired: 'greenIndustry',
+    effects: { passiveIncome: 200, gdpGrowthBonus: 0.010, effectDesc: '+$200M/turn passive income, +1.0% GDP growth' }
+  },
+  internetInfrastructure: {
+    id: 'internetInfrastructure',
+    name: 'Internet Infrastructure',
+    category: 'infrastructure',
+    icon: '\uD83C\uDF10',
+    description: 'Roll out empire-wide broadband internet. Dramatically reduces infrastructure decay and delivers the largest GDP growth bonus of any project.',
+    cost: 4500,
+    techRequired: 'digitalEconomy',
+    effects: { infraDecayMult: 0.75, gdpGrowthBonus: 0.015, effectDesc: '\u221225% infra decay rate, +1.5% GDP growth' }
+  },};

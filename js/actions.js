@@ -11,7 +11,8 @@ function setPolicyFunding(policyId, value) {
   const funding = Math.max(0, Math.min(20, parseInt(value, 10)));
   G.policyFunding[policyId] = funding;
 
-  const cost = getPolicyCost(policyId);
+  const cost = getEffectivePolicyCost(policyId);
+  const allocated = getPolicyCost(policyId);
 
   // Update this card's cost label and active class
   const costEl = document.getElementById('pc-' + policyId);
@@ -20,7 +21,7 @@ function setPolicyFunding(policyId, value) {
     costEl.className = 'policy-cost' + (cost > 0 ? '' : ' inactive');
   }
   const displayEl = document.getElementById('pd-' + policyId);
-  if (displayEl) displayEl.textContent = funding + '% of income \u2014 ' + (cost > 0 ? fmt(cost) + '/turn' : 'Inactive');
+  if (displayEl) displayEl.textContent = funding + '% of income \u2014 ' + (allocated > 0 ? fmt(allocated) + '/turn allocated' : 'Inactive');
 
   // Toggle the card's active class so the slider thumb colour updates
   const cardEl = costEl && costEl.closest('.policy-card');
@@ -28,6 +29,7 @@ function setPolicyFunding(policyId, value) {
 
   updateBudgetProjection();
   renderHeader();
+  renderDashboard();
 }
 
 function setTaxRate(value) {
@@ -38,48 +40,19 @@ function setTaxRate(value) {
   renderHeader();
 }
 
-function toggleBuildResearchCentre() {
-  if (!G.buildingResearchCentre && G.policyFunding.infrastructure === 0) {
-    showNotification('Set infrastructure funding above 0 first!', 'error');
-    return;
-  }
-  G.buildingResearchCentre = !G.buildingResearchCentre;
-  if (!G.buildingResearchCentre) {
-    G.researchCentreBuildProgress = 0;
-    showNotification('Construction cancelled.', 'info');
-  } else {
-    showNotification('🏗️ Building research centre — split infra budget with the slider.', 'good');
-  }
-  renderAll();
-}
-
-function setResearchCentreBuildFraction(val) {
-  G.researchCentreBuildFraction = Math.max(0, Math.min(100, parseInt(val, 10) || 0));
-  renderAll();
-}
-
 function openTradeRoute() {
-  const slots = getTradeRouteSlots();
-  if (G.tradeRoutes >= slots) {
-    const needed = (G.tradeRoutes + 1) * TRADE_ROUTE_LEVEL_NEEDED;
-    showNotification('Need Finance level ' + needed + ' to open another route.', 'error');
-    return;
-  }
-  if (G.treasury < TRADE_ROUTE_COST) {
-    showNotification('Need ' + fmt(TRADE_ROUTE_COST) + ' treasury to open a route.', 'error');
-    return;
-  }
-  G.treasury -= TRADE_ROUTE_COST;
-  G.tradeRoutes++;
-  addLog('Trade route #' + G.tradeRoutes + ' opened (\u2212' + fmt(TRADE_ROUTE_COST) + '). Income: +' + fmt(getTradeRouteIncomePerRoute()) + '/turn per route.', 'good');
-  showNotification('\ud83d\udea2 Trade route #' + G.tradeRoutes + ' opened!', 'good');
+  const route = { id: G.nextTradeRouteId++, partnerId: null, maturity: 0 };
+  G.tradeRoutes.push(route);
+  addLog('Trade route #' + route.id + ' opened. Income ramps to +' + fmt(TRADE_ROUTE_INCOME_MAX) + '/turn over ' + TRADE_ROUTE_MATURITY_TURNS + ' turns.', 'good');
+  showNotification('\ud83d\udea2 Trade route #' + route.id + ' opened!', 'good');
   renderAll();
 }
 
-function closeTradeRoute() {
-  if (G.tradeRoutes <= 0) return;
-  G.tradeRoutes--;
-  showNotification('Trade route closed. (' + G.tradeRoutes + ' remaining)', 'info');
+function closeTradeRoute(routeId) {
+  const idx = G.tradeRoutes.findIndex(r => r.id === routeId);
+  if (idx === -1) return;
+  G.tradeRoutes.splice(idx, 1);
+  showNotification('Trade route #' + routeId + ' closed. (' + G.tradeRoutes.length + ' remaining)', 'info');
   renderAll();
 }
 
@@ -91,8 +64,8 @@ function setActiveResearch(techId) {
     showNotification('Prerequisite not met: ' + missingReqs.map(r => TECHNOLOGIES[r].name).join(', '), 'error');
     return;
   }
-  if (G.researchCentres === 0) {
-    showNotification('Build a research centre first!', 'error');
+  if (G.researchLevel <= 0) {
+    showNotification('Set Research policy funding above 0 first!', 'error');
     return;
   }
   if (G.activeResearch === techId) {
@@ -108,11 +81,36 @@ function setActiveResearch(techId) {
   renderAll();
 }
 
+function setProjectFunding(projectId, amountStr) {
+  const amount = Math.max(0, parseInt(amountStr, 10) || 0);
+  if (G.completedProjects.includes(projectId)) return;
+
+  // Only 1 infrastructure megaproject may be funded at a time.
+  // If funding a new infra project, cancel all other active infra projects first.
+  if (amount > 0 && PROJECTS[projectId].category === 'infrastructure') {
+    for (const id of Object.keys(G.projectFunding)) {
+      if (id !== projectId && PROJECTS[id] && PROJECTS[id].category === 'infrastructure') {
+        delete G.projectFunding[id];
+      }
+    }
+  }
+
+  if (amount === 0) {
+    delete G.projectFunding[projectId];
+  } else {
+    G.projectFunding[projectId] = amount;
+  }
+  updateBudgetProjection();
+  renderHeader();
+  renderDashboard();
+}
+
 function endTurn() {
 
-  // 1. Grow GDP first so income calculation matches what's displayed
+  // 1. Grow GDP per-capita (productivity growth). Total GDP = population × gdpPerCapita / 1000.
   const growth = getEffectiveGrowthRate();
-  G.gdp = G.gdp * (1 + growth);
+  G.gdpPerCapita = G.gdpPerCapita * (1 + growth);
+  G.gdp = G.population * G.gdpPerCapita / 1000;
 
   // 1.3. Update economic sector levels (Mining, Manufacturing, Commerce, Finance)
   // Each sector grows with spending and decays 1 level/turn without it.
@@ -122,12 +120,7 @@ function endTurn() {
       const spend    = getTaxIncome() * (G.policyFunding[sector] / 100);
       const growRate = SECTOR_GROW_PER_M / (1 + SECTOR_GROW_HARDNESS * G[levelKey]);
       const net      = spend * growRate - SECTOR_DECAY;
-      const unclamped = G[levelKey] + net;
-      if (unclamped > 100) {
-        const sectorOverspendRefund = (unclamped - 100) / growRate;
-        G.treasury += sectorOverspendRefund;
-      }
-      G[levelKey]    = Math.min(100, Math.max(0, unclamped));
+      G[levelKey]    = Math.min(100, Math.max(0, G[levelKey] + net));
     } else if (G[levelKey] > 0) {
       G[levelKey] = Math.max(0, G[levelKey] - SECTOR_DECAY);
     }
@@ -141,43 +134,73 @@ function endTurn() {
   }
 
   // 1.4. Update infrastructure level
-  // Repair rate shrinks at higher levels (harder to improve a mature network).
-  // Decay rate grows with level (a bigger network needs more upkeep).
-  // Both effects apply simultaneously — insufficient spending makes levels fall even when funded.
-  // While building a research centre, infrastructure spend is split: researchCentreBuildFraction% → construction, rest → repair.
   {
     const te = getTechEffects();
-    const decay = getTaxIncome() * INFRA_MAINTAIN_FRAC / (1 + INFRA_REPAIR_HARDNESS * G.infraLevel) * te.infraDecayMult;
+    const pe = getProjectEffects();
+    const decay = getTaxIncome() * INFRA_MAINTAIN_FRAC / (1 + INFRA_REPAIR_HARDNESS * G.infraLevel) * te.infraDecayMult * pe.infraDecayMult;
     if (G.policyFunding.infrastructure > 0) {
-      const totalInfraSpend = getTaxIncome() * (G.policyFunding.infrastructure / 100);
-      const repairSpend = G.buildingResearchCentre
-        ? totalInfraSpend * (1 - G.researchCentreBuildFraction / 100)
-        : totalInfraSpend;
+      const repairSpend = getTaxIncome() * (G.policyFunding.infrastructure / 100);
       const repairRate = INFRA_REPAIR_PER_M / (1 + INFRA_REPAIR_HARDNESS * G.infraLevel) * te.infraGrowthMult;
       const net = repairSpend * repairRate - decay;
-      const unclamped = G.infraLevel + net;
-      if (unclamped > 100) {
-        // Refund the spend that would have pushed infra past 100
-        const infraOverspendRefund = (unclamped - 100) / repairRate;
-        G.treasury += infraOverspendRefund;
-      }
-      G.infraLevel = Math.min(100, Math.max(0, unclamped));
+      G.infraLevel = Math.min(100, Math.max(0, G.infraLevel + net));
     } else if (G.infraLevel > 0) {
       G.infraLevel = Math.max(0, G.infraLevel - decay);
     }
   }
 
-  // 1.5. Research centre construction: use the build fraction of the infra budget
-  if (G.buildingResearchCentre && G.policyFunding.infrastructure > 0) {
-    const totalInfraSpend = getTaxIncome() * (G.policyFunding.infrastructure / 100);
-    const buildSpend = totalInfraSpend * (G.researchCentreBuildFraction / 100);
-    G.researchCentreBuildProgress += buildSpend;
-    if (G.researchCentreBuildProgress >= RESEARCH_CENTRE_BUILD_COST) {
-      G.researchCentres++;
-      G.researchCentreBuildProgress = 0;
-      G.buildingResearchCentre = false;
-      addLog('Research Centre #' + G.researchCentres + ' built via infrastructure investment — ' + getRpPerTurn().toFixed(1) + ' RP/turn.', 'good');
-      showNotification('🏗️ Research Centre #' + G.researchCentres + ' complete!', 'good');
+  // 1.5. Update social sector levels (Healthcare, Education) — same growth model as economic
+  // sectors but slower decay (SOCIAL_SECTOR_DECAY). Spend uses population-scaled cost since
+  // larger populations require proportionally more healthcare/education investment.
+  for (const policyId of ['healthcare', 'education']) {
+    const levelKey = policyId + 'Level';
+    if (G.policyFunding[policyId] > 0) {
+      const spend    = getPolicyCost(policyId);
+      const growRate = SECTOR_GROW_PER_M / (1 + SECTOR_GROW_HARDNESS * G[levelKey]);
+      const net      = spend * growRate - SOCIAL_SECTOR_DECAY;
+      G[levelKey] = Math.min(100, Math.max(0, G[levelKey] + net));
+    } else if (G[levelKey] > 0) {
+      G[levelKey] = Math.max(0, G[levelKey] - SOCIAL_SECTOR_DECAY);
+    }
+  }
+
+  // 1.6. Update military level — full SECTOR_DECAY (force readiness degrades quickly without spending)
+  {
+    const militarySpend = G.policyFunding.military > 0
+      ? getTaxIncome() * (G.policyFunding.military / 100) : 0;
+    if (militarySpend > 0) {
+      const growRate  = SECTOR_GROW_PER_M / (1 + SECTOR_GROW_HARDNESS * G.militaryLevel);
+      const net       = militarySpend * growRate - SECTOR_DECAY;
+      G.militaryLevel = Math.min(100, Math.max(0, G.militaryLevel + net));
+    } else if (G.militaryLevel > 0) {
+      G.militaryLevel = Math.max(0, G.militaryLevel - SECTOR_DECAY);
+    }
+  }
+
+  // 1.7. Research level — same growth model as social sectors, capped at getResearchCapacityCeiling()
+  {
+    const ceiling = getResearchCapacityCeiling();
+    if (G.policyFunding.research > 0) {
+      const spend    = getPolicyCost('research');
+      const growRate = SECTOR_GROW_PER_M / (1 + SECTOR_GROW_HARDNESS * G.researchLevel);
+      const net      = spend * growRate - SOCIAL_SECTOR_DECAY;
+      G.researchLevel = Math.min(ceiling, Math.max(0, G.researchLevel + net));
+    } else if (G.researchLevel > 0) {
+      G.researchLevel = Math.max(0, G.researchLevel - SOCIAL_SECTOR_DECAY);
+    }
+  }
+
+  // 1.8. Project progress — direct treasury investment per active project
+  for (const [projId, amount] of Object.entries(G.projectFunding)) {
+    if (amount <= 0 || G.completedProjects.includes(projId)) continue;
+    if (!G.projectProgress[projId]) G.projectProgress[projId] = 0;
+    G.treasury -= amount;
+    G.projectProgress[projId] += amount;
+    const proj = PROJECTS[projId];
+    if (G.projectProgress[projId] >= proj.cost) {
+      G.completedProjects.push(projId);
+      delete G.projectFunding[projId];
+      addLog('Project complete: ' + proj.name + ' — ' + proj.effects.effectDesc, 'good');
+      showNotification('✓ ' + proj.name + ' complete!', 'good');
     }
   }
 
@@ -185,11 +208,15 @@ function endTurn() {
   const net = getNetIncome();
   G.treasury += net;
 
-  // 2.4. Trade route income (passive, scales with finance level)
-  if (G.tradeRoutes > 0) {
-    const routeIncome = G.tradeRoutes * (TRADE_ROUTE_INCOME + G.financeLevel * TRADE_ROUTE_FINANCE_SCALE);
+  // 2.4. Trade route income — maturity-based, ramps linearly over TRADE_ROUTE_MATURITY_TURNS
+  if (G.tradeRoutes.length > 0) {
+    let routeIncome = 0;
+    for (const route of G.tradeRoutes) {
+      route.maturity++;
+      routeIncome += getTradeRouteIncome(route);
+    }
     G.treasury += routeIncome;
-    addLog('Trade route income: +' + fmt(routeIncome) + ' (' + G.tradeRoutes + ' routes, Finance lvl ' + Math.round(G.financeLevel) + ')', 'good');
+    if (routeIncome > 0) addLog('Trade route income: +' + fmt(routeIncome) + ' (' + G.tradeRoutes.length + ' route' + (G.tradeRoutes.length !== 1 ? 's' : '') + ')', 'good');
   }
 
   // 2.5. Apply scaling interest on treasury
@@ -208,7 +235,7 @@ function endTurn() {
   }
 
   // 4. Research progress
-  if (G.activeResearch && G.researchCentres > 0) {
+  if (G.activeResearch && G.researchLevel > 0) {
     G.researchProgress += getRpPerTurn();
     const activeTech = TECHNOLOGIES[G.activeResearch];
     if (G.researchProgress >= getTechCost(G.activeResearch)) {
@@ -220,8 +247,7 @@ function endTurn() {
     }
   }
 
-  // 5. Military strength
-  G.militaryStrength = (POLICIES.military.effects.militaryStrength || 0) * policyEffectScale('military');
+  // 5. Military strength — derived from militaryLevel via getMilitaryStrength() (engine.js)
 
   // 6. Advance time
   G.year++;
@@ -232,6 +258,11 @@ function endTurn() {
   const happinessDelta = Math.max(-HAPPINESS_DRIFT_CAP, Math.min(HAPPINESS_DRIFT_CAP,
     (happinessTarget - G.happiness) * 0.05));
   G.happiness = Math.max(0, Math.min(100, G.happiness + happinessDelta));
+
+  // 7.5. Population growth (uses final happiness from this turn, before logging)
+  const popGrowthRate = getPopulationGrowthRate();
+  G.population = G.population * (1 + popGrowthRate);
+  G.gdp = G.population * G.gdpPerCapita / 1000;
 
   // 8. Log turn summary
   const happiness = G.happiness;
@@ -247,6 +278,9 @@ function endTurn() {
     turn:            G.turn,
     treasury:        G.treasury,
     gdp:             G.gdp,
+    gdpPerCapita:    G.gdpPerCapita,
+    population:      G.population,
+    populationCap:   getPopulationCap(),
     netIncome:       net,
     taxIncome:       getTaxIncome(),
     totalExpenses:   getTotalExpenses(),
@@ -256,9 +290,12 @@ function endTurn() {
     manufacturingLevel:  G.manufacturingLevel,
     commerceLevel:       G.commerceLevel,
     financeLevel:    G.financeLevel,
-    tradeRoutes:     G.tradeRoutes,
-    researchCentres: G.researchCentres,
-    militaryStrength: G.militaryStrength,
+    healthcareLevel: G.healthcareLevel,
+    educationLevel:  G.educationLevel,
+    militaryLevel:   G.militaryLevel,
+    researchLevel:   G.researchLevel,
+    tradeRoutes:     G.tradeRoutes.length,
+    militaryStrength: getMilitaryStrength(),
     activeResearch:  G.activeResearch,
     unlockedTechs:   G.unlockedTechs.length,
   });
