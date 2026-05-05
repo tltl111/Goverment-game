@@ -1601,3 +1601,97 @@ section {
   border-radius: 3px;
   transition: width 0.4s ease;
 }
+
+/* ====== WORLD MAP ====== */
+.world-map-container {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+}
+
+.world-map-svg {
+  width: 100%;
+  aspect-ratio: 800 / 560;
+  display: block;
+  cursor: grab;
+  user-select: none;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #0a1422;
+}
+.world-map-svg:active { cursor: grabbing; }
+
+.map-region {
+  stroke: #0a1422;
+  stroke-width: 1.5;
+  cursor: pointer;
+  transition: filter 0.12s;
+}
+.map-region:hover { filter: brightness(1.25); stroke: rgba(255,255,255,0.35); stroke-width: 2; }
+.map-region-selected { stroke: rgba(255,255,255,0.7) !important; stroke-width: 2.5 !important; filter: brightness(1.2); }
+.map-region-friendly { outline: none; }
+.map-region-hostile  { outline: none; }
+
+.map-province {
+  stroke: rgba(255,255,255,0.15);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.map-label {
+  font-size: 13px;
+  font-weight: 700;
+  fill: rgba(255,255,255,0.92);
+  stroke: #0a1422;
+  stroke-width: 3;
+  paint-order: stroke;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+  font-family: inherit;
+}
+.map-player-label { fill: #7eb8ff; font-size: 14px; }
+
+.map-province-label {
+  font-size: 9px;
+  font-weight: 600;
+  fill: rgba(200,225,255,0.6);
+  stroke: #0a1422;
+  stroke-width: 2;
+  paint-order: stroke;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+  font-family: inherit;
+}
+
+.map-capital {
+  fill: rgba(255,255,255,0.88);
+  stroke: #0a1422;
+  stroke-width: 1;
+  pointer-events: none;
+}
+.map-player-capital { fill: #7eb8ff; stroke: #0a1422; stroke-width: 1.5; }
+
+/* Info panel */
+.map-info-panel {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.map-info-nation {
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+}
+.map-info-name { font-size: 14px; font-weight: 700; color: var(--text-1); }
+.map-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.map-info-item { display: flex; flex-direction: column; gap: 2px; }
+.map-info-item-wide { grid-column: span 2; }
+.map-info-label { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.map-info-val { font-size: 12px; font-weight: 600; color: var(--text-1); }

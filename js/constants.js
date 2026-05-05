@@ -70,3 +70,7 @@ const POP_GROWTH_MAX              = 0.03;   // ceiling: optimal conditions
 const POPULATION_REFERENCE        = 10;     // reference pop for social policy cost scaling (M)
 const POPULATION_COST_EXPONENT    = 0.7;    // sub-linear exponent for healthcare/education costs
 const MILITARY_MANPOWER_RATIO     = 25;     // soft military strength cap per million citizens
+
+// AI Nations — per-turn tick behaviour (same for all nations in Phase 3.1)
+const NATION_MILITARY_DRIFT_RATE  = 0.05;   // fraction of gap closed per turn toward starting militaryLevel
+const NATION_RELATIONS_DRIFT_RATE = 0.2;    // points/turn relations drifts back toward 50 (neutral)

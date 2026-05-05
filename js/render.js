@@ -2,6 +2,13 @@
 // RENDER — all DOM rendering functions (reads G, writes DOM)
 // ============================================================
 
+// World map pan/zoom state (UI state, not game state)
+let _mapVB = { x: 0, y: 0, w: 800, h: 560 };
+let _mapDrag = null;        // { startClientX, startClientY, startVBX, startVBY, svgW, svgH }
+let _mapDragMoved = false;  // distinguishes drag from click
+let _mapSelectedNation = null;
+let _mapDocListenersAttached = false;
+
 function renderAll() {
   renderHeader();
   renderPolicies();
@@ -363,6 +370,21 @@ function renderDashboard() {
         </div>` : ''}`;
     }
 
+    // World Status — AI nations table
+    let nationRows = '';
+    for (const [id, nation] of Object.entries(G.nations)) {
+      const def = NATIONS[id];
+      const relClass = nation.relations >= 65 ? 'stat-pos' : nation.relations <= 35 ? 'stat-neg' : '';
+      const relLabel = nation.relations >= 65 ? 'Friendly' : nation.relations <= 35 ? 'Hostile' : 'Neutral';
+      const milPct   = nation.militaryLevel.toFixed(0);
+      nationRows += `<tr>
+        <td>${def.name}</td>
+        <td>$${nation.gdp.toFixed(0)}B</td>
+        <td>${milPct}</td>
+        <td class="${relClass}">${nation.relations.toFixed(0)} — ${relLabel}</td>
+      </tr>`;
+    }
+
     document.getElementById('tab-statistics').innerHTML = `
       <div class="statistics-panel">
         <div class="stat-section">
@@ -383,6 +405,15 @@ function renderDashboard() {
         <div class="stat-section">
           <div class="stat-section-title">Research Tracker</div>
           ${researchRows}
+        </div>
+        <div class="stat-section">
+          <div class="stat-section-title">World Status</div>
+          <table class="stat-ledger-table stat-nations-table">
+            <thead>
+              <tr><th>Nation</th><th>GDP</th><th>Military</th><th>Relations</th></tr>
+            </thead>
+            <tbody>${nationRows}</tbody>
+          </table>
         </div>
       </div>`;
   }
@@ -561,4 +592,142 @@ function renderDashboard() {
     document.getElementById('tab-buildings').innerHTML = `
       <div class="projects-panel">${sectionsHtml}</div>`;
   }
+
+  if (tab === 'world') {
+    renderWorldMap();
+  }
+}
+
+// ============================================================
+// WORLD MAP
+// ============================================================
+
+function renderWorldMap() {
+  const panelEl = document.getElementById('tab-world');
+  if (!panelEl) return;
+
+  const vbStr = `${_mapVB.x.toFixed(1)} ${_mapVB.y.toFixed(1)} ${_mapVB.w.toFixed(1)} ${_mapVB.h.toFixed(1)}`;
+
+  // --- Build SVG ---
+  let svg = '';
+  // Ocean background (extends beyond viewBox to cover pan)
+  svg += `<rect x="-200" y="-200" width="1200" height="960" fill="#0a1422"/>`;
+
+  // Nation regions
+  for (const [id, region] of Object.entries(MAP_REGIONS)) {
+    if (id === 'player') continue;
+    const ns = G.nations[id];
+    if (!ns) continue;
+    const sel    = _mapSelectedNation === id ? ' map-region-selected' : '';
+    const relCls = ns.relations >= 65 ? ' map-region-friendly' : ns.relations <= 35 ? ' map-region-hostile' : '';
+    svg += `<polygon class="map-region${relCls}${sel}" points="${region.points}" fill="${region.color}" onclick="selectMapNation('${id}')"/>`;
+    svg += `<text class="map-label" x="${region.labelX}" y="${region.labelY}">${NATIONS[id].name}</text>`;
+    svg += `<circle class="map-capital" cx="${region.capitalX}" cy="${region.capitalY}" r="3"/>`;
+  }
+
+  // Player empire provinces
+  const pr = MAP_REGIONS.player;
+  for (const prov of Object.values(pr.provinces)) {
+    svg += `<polygon class="map-province" points="${prov.points}" fill="${prov.color}"/>`;
+    svg += `<text class="map-province-label" x="${prov.labelX}" y="${prov.labelY}">${prov.name}</text>`;
+  }
+  svg += `<text class="map-label map-player-label" x="${pr.labelX}" y="${pr.labelY}">${G.empire}</text>`;
+  svg += `<circle class="map-capital map-player-capital" cx="${pr.capitalX}" cy="${pr.capitalY}" r="4"/>`;
+
+  // --- Info panel for selected nation ---
+  let infoHtml = '';
+  if (_mapSelectedNation && G.nations[_mapSelectedNation]) {
+    const ns  = G.nations[_mapSelectedNation];
+    const def = NATIONS[_mapSelectedNation];
+    const reg = MAP_REGIONS[_mapSelectedNation];
+    const relLabel = ns.relations >= 65 ? 'Friendly' : ns.relations <= 35 ? 'Hostile' : 'Neutral';
+    const relCls   = ns.relations >= 65 ? 'stat-pos'  : ns.relations <= 35 ? 'stat-neg'  : '';
+    const borders  = (def.adjacency || []).map(a => a === 'player' ? G.empire : (NATIONS[a] ? NATIONS[a].name : a)).join(', ');
+    infoHtml = `
+      <div class="map-info-panel">
+        <div class="map-info-nation" style="border-left:3px solid ${reg.color}">
+          <span class="map-info-name">${def.name}</span>
+        </div>
+        <div class="map-info-grid">
+          <div class="map-info-item"><div class="map-info-label">GDP</div><div class="map-info-val">$${ns.gdp.toFixed(0)}B</div></div>
+          <div class="map-info-item"><div class="map-info-label">Military</div><div class="map-info-val">${ns.militaryLevel.toFixed(0)} / 100</div></div>
+          <div class="map-info-item"><div class="map-info-label">Relations</div><div class="map-info-val ${relCls}">${ns.relations.toFixed(0)} \u2014 ${relLabel}</div></div>
+          <div class="map-info-item map-info-item-wide"><div class="map-info-label">Borders</div><div class="map-info-val">${borders}</div></div>
+        </div>
+      </div>`;
+  }
+
+  panelEl.innerHTML = `
+    <div class="world-map-container">
+      <svg id="world-map-svg" viewBox="${vbStr}" preserveAspectRatio="xMidYMid meet" class="world-map-svg">
+        ${svg}
+      </svg>
+      ${infoHtml}
+    </div>`;
+
+  initMapInteraction();
+}
+
+function selectMapNation(id) {
+  if (_mapDragMoved) return;
+  _mapSelectedNation = (_mapSelectedNation === id) ? null : id;
+  renderWorldMap();
+}
+
+function initMapInteraction() {
+  const svg = document.getElementById('world-map-svg');
+  if (!svg) return;
+  svg.addEventListener('wheel', _mapOnWheel, { passive: false });
+  svg.addEventListener('mousedown', _mapOnMouseDown);
+  if (!_mapDocListenersAttached) {
+    document.addEventListener('mousemove', _mapOnMouseMove);
+    document.addEventListener('mouseup', _mapOnMouseUp);
+    _mapDocListenersAttached = true;
+  }
+}
+
+function _mapOnWheel(e) {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / rect.width;
+  const my = (e.clientY - rect.top) / rect.height;
+  const cx = _mapVB.x + mx * _mapVB.w;
+  const cy = _mapVB.y + my * _mapVB.h;
+  _mapVB.w = Math.max(120, Math.min(1200, _mapVB.w * factor));
+  _mapVB.h = _mapVB.w * (560 / 800);
+  _mapVB.x = cx - mx * _mapVB.w;
+  _mapVB.y = cy - my * _mapVB.h;
+  _updateMapViewBox();
+}
+
+function _mapOnMouseDown(e) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const rect = e.currentTarget.getBoundingClientRect();
+  _mapDrag = { startClientX: e.clientX, startClientY: e.clientY,
+               startVBX: _mapVB.x, startVBY: _mapVB.y,
+               svgW: rect.width, svgH: rect.height };
+  _mapDragMoved = false;
+}
+
+function _mapOnMouseMove(e) {
+  if (!_mapDrag) return;
+  const dx = e.clientX - _mapDrag.startClientX;
+  const dy = e.clientY - _mapDrag.startClientY;
+  if (!_mapDragMoved && Math.abs(dx) + Math.abs(dy) < 5) return;
+  _mapDragMoved = true;
+  _mapVB.x = _mapDrag.startVBX - (dx / _mapDrag.svgW) * _mapVB.w;
+  _mapVB.y = _mapDrag.startVBY - (dy / _mapDrag.svgH) * _mapVB.h;
+  _updateMapViewBox();
+}
+
+function _mapOnMouseUp() {
+  _mapDrag = null;
+}
+
+function _updateMapViewBox() {
+  const svg = document.getElementById('world-map-svg');
+  if (svg) svg.setAttribute('viewBox',
+    `${_mapVB.x.toFixed(1)} ${_mapVB.y.toFixed(1)} ${_mapVB.w.toFixed(1)} ${_mapVB.h.toFixed(1)}`);
 }

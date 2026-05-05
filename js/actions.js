@@ -301,5 +301,15 @@ function endTurn() {
   });
   if (G.history.length > 50) G.history.shift();
 
+  // 10. Tick AI nations — GDP growth, military drift, relations drift toward neutral
+  for (const [id, nation] of Object.entries(G.nations)) {
+    const def = NATIONS[id];
+    nation.gdp           *= (1 + def.gdpGrowthRate);
+    nation.militaryLevel += NATION_MILITARY_DRIFT_RATE * (def.militaryLevel - nation.militaryLevel);
+    nation.relations     += NATION_RELATIONS_DRIFT_RATE * (50 - nation.relations);
+    nation.militaryLevel  = Math.max(0, Math.min(100, nation.militaryLevel));
+    nation.relations      = Math.max(0, Math.min(100, nation.relations));
+  }
+
   renderAll();
 }

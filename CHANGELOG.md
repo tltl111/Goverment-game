@@ -4,6 +4,28 @@ All notable changes to Government Simulator will be documented here.
 
 ---
 
+## [0.10.0] — 2026-05-05
+
+### Added — World Map (Phase 3.2)
+- New **World** dashboard tab with a zoomable, pannable SVG map of the continent
+- 8 AI nations rendered as clickable coloured polygon regions
+- Player empire subdivided into 4 provinces: **Arvenmoor**, **Caldrath**, **Thornhaven**, **Selmark**
+- Capital dot markers and nation name labels on every region
+- Click a nation to open an info panel showing GDP, Military, Relations, and border neighbours; click again to deselect
+- Scroll to zoom (cursor-centred), drag to pan; viewport state persists between tab switches
+- Drag vs. click distinguished by a 5 px movement threshold (drag never triggers nation selection)
+- `MAP_REGIONS` constant added to `data.js` with polygon coordinates, colours, province definitions
+- `adjacency` field added to all 8 NATIONS entries
+- Module-level pan/zoom state in `render.js` (`_mapVB`, `_mapDrag`, `_mapSelectedNation`)
+
+### Design
+- Province data model designed for Phase 5.0: provinces have `development`, `infraLevel`, `deposit`, `owner`, `adjacency`; nation GDP/military will become emergent from province composition
+- Phase 5.0 (EU4-style high-density province map redesign) added to roadmap
+- Phase 5.5 conquest updated to territorial.io adjacency mechanic (province-by-province, adjacency-gated)
+- Prospecting (Phase 3.5) clarified to operate on owned provinces, starting with the 4 starting provinces
+
+---
+
 ## [0.9.0] — 2026-05-03
 
 ### Added — Infrastructure Megaprojects (Phase 2.7)

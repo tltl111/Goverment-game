@@ -34,8 +34,10 @@ Open `index.html` in a browser — no build step required.
 - **Research system**: Research policy builds Research level (0–ceiling); RP/turn drives tech progress; techs show estimated turns to complete
 - Happiness pool with target-convergence model; tax, military, healthcare, education, and tech all contribute
 - Debt interest capped at 50%/turn; Finance level discounts interest
-- Dashboard tabs: Overview · Trade Routes · Research · Projects · Statistics · Events Log
+- Dashboard tabs: Overview · Trade Routes · Research · Projects · Statistics · **World** · Events Log
 - Statistics screen: Economy Ledger, Sector Status, Research Tracker
+- **World map**: zoomable/pannable SVG continent; 8 AI nations as clickable regions; player empire as 4 provinces; click a nation for GDP/military/relations/borders info panel
+- **AI nations**: 8 nations tick each turn (GDP growth, military drift, relations drift toward neutral)
 
 ## Project Structure
 

@@ -342,4 +342,142 @@ const PROJECTS = {
     cost: 4500,
     techRequired: 'digitalEconomy',
     effects: { infraDecayMult: 0.75, gdpGrowthBonus: 0.015, effectDesc: '\u221225% infra decay rate, +1.5% GDP growth' }
-  },};
+  },
+};
+
+// ============================================================
+// NATIONS — static nation definitions. Starting stats only.
+// Per-turn AI behaviour is driven by constants in constants.js.
+// Live state is stored in G.nations (see state.js).
+// ============================================================
+const NATIONS = {
+  valdoria: {
+    id: 'valdoria', name: 'Valdoria',
+    gdp: 800,
+    militaryLevel: 20,
+    gdpGrowthRate: 0.020,
+    adjacency: ['player', 'sorenia', 'orzhan'],
+  },
+  kethara: {
+    id: 'kethara', name: 'Kethara',
+    gdp: 1200,
+    militaryLevel: 35,
+    gdpGrowthRate: 0.030,
+    adjacency: ['player', 'sorenia', 'marveth'],
+  },
+  orzhan: {
+    id: 'orzhan', name: 'Orzhan',
+    gdp: 600,
+    militaryLevel: 70,
+    gdpGrowthRate: 0.010,
+    adjacency: ['valdoria', 'nocthar', 'durenna'],
+  },
+  sorenia: {
+    id: 'sorenia', name: 'Sorenia',
+    gdp: 500,
+    militaryLevel: 10,
+    gdpGrowthRate: 0.020,
+    adjacency: ['valdoria', 'kethara'],
+  },
+  iravan: {
+    id: 'iravan', name: 'Iravan',
+    gdp: 700,
+    militaryLevel: 40,
+    gdpGrowthRate: 0.020,
+    adjacency: ['marveth', 'nocthar', 'durenna'],
+  },
+  durenna: {
+    id: 'durenna', name: 'Durenna',
+    gdp: 300,
+    militaryLevel: 35,
+    gdpGrowthRate: 0.025,
+    adjacency: ['orzhan', 'nocthar', 'iravan'],
+  },
+  marveth: {
+    id: 'marveth', name: 'Marveth',
+    gdp: 500,
+    militaryLevel: 20,
+    gdpGrowthRate: 0.015,
+    adjacency: ['player', 'kethara', 'iravan'],
+  },
+  nocthar: {
+    id: 'nocthar', name: 'Nocthar',
+    gdp: 550,
+    militaryLevel: 55,
+    gdpGrowthRate: 0.015,
+    adjacency: ['player', 'orzhan', 'iravan', 'durenna'],
+  },
+};
+
+// ============================================================
+// MAP_REGIONS — SVG polygon coordinates and visual data for the world map.
+// Coordinate space: 800 × 560 viewBox. Single continent layout.
+//
+// Shared border vertices:
+//   A=(280,30)  B=(510,28)  C=(75,200)   D=(280,195)  E=(510,200)
+//   F=(740,200) G=(75,360)  H=(270,360)  I=(510,355)  J=(730,330)
+//   K1=(75,460) K2=(270,460) K3=(510,460) K4=(720,460)
+//
+// Player empire borders: Valdoria (west), Kethara (north), Marveth (east), Nocthar (south)
+// ============================================================
+const MAP_REGIONS = {
+  sorenia: {
+    points: '90,70 160,40 280,30 280,195 75,200 75,130',
+    labelX: 155, labelY: 117,
+    capitalX: 158, capitalY: 100,
+    color: '#5a7da8',
+  },
+  kethara: {
+    points: '280,30 510,28 510,200 280,195',
+    labelX: 395, labelY: 117,
+    capitalX: 395, capitalY: 100,
+    color: '#c4884a',
+  },
+  marveth: {
+    points: '510,28 640,50 730,110 740,200 730,330 510,355 510,200',
+    labelX: 617, labelY: 195,
+    capitalX: 640, capitalY: 175,
+    color: '#7a6b9e',
+  },
+  valdoria: {
+    points: '75,200 280,195 270,360 75,360',
+    labelX: 172, labelY: 280,
+    capitalX: 175, capitalY: 262,
+    color: '#5e9c76',
+  },
+  orzhan: {
+    points: '75,360 270,360 270,460 75,460',
+    labelX: 173, labelY: 412,
+    capitalX: 173, capitalY: 394,
+    color: '#8a4a4a',
+  },
+  nocthar: {
+    points: '270,360 510,355 510,460 270,460',
+    labelX: 390, labelY: 412,
+    capitalX: 412, capitalY: 393,
+    color: '#9e6b4a',
+  },
+  iravan: {
+    points: '510,355 730,330 720,460 510,460',
+    labelX: 615, labelY: 403,
+    capitalX: 615, capitalY: 384,
+    color: '#b8924e',
+  },
+  durenna: {
+    points: '75,460 270,460 510,460 720,460 680,490 550,510 400,520 250,515 100,500 80,470',
+    labelX: 364, labelY: 490,
+    capitalX: 382, capitalY: 477,
+    color: '#6b8a5e',
+  },
+  // Player empire — no `color` (uses province colors); no `adjacency` in NATIONS since player is not a nation
+  player: {
+    labelX: 393, labelY: 262,
+    capitalX: 393, capitalY: 248,
+    provinces: {
+      arvenmoor: { name: 'Arvenmoor', points: '280,195 395,198 395,278 275,278', color: '#1a5898', labelX: 333, labelY: 240 },
+      caldrath:  { name: 'Caldrath',  points: '395,198 510,200 510,278 395,278', color: '#205ea8', labelX: 452, labelY: 240 },
+      thornhaven:{ name: 'Thornhaven',points: '275,278 395,278 390,358 270,360', color: '#184898', labelX: 326, labelY: 320 },
+      selmark:   { name: 'Selmark',   points: '395,278 510,278 510,355 390,358', color: '#2860b0', labelX: 450, labelY: 318 },
+    },
+  },
+};

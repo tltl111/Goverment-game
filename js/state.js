@@ -63,6 +63,16 @@ function initGame(empireName) {
 
     unlockedTechs: [],
 
+    // AI nations — live state; static definitions are in NATIONS (data.js).
+    // { [id]: { gdp, militaryLevel, relations } }
+    nations: Object.fromEntries(
+      Object.entries(NATIONS).map(([id, n]) => [id, {
+        gdp:           n.gdp,
+        militaryLevel: n.militaryLevel,
+        relations:     50,   // 0=hostile … 100=allied; starts neutral
+      }])
+    ),
+
     // Turn-by-turn snapshots for the Statistics screen (last 50 turns)
     history: [],
 
