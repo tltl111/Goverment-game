@@ -26,8 +26,10 @@ function initGame(empireName) {
     // Economic sector levels (0–100), built by spending on corresponding policies
     miningLevel: 0,
     manufacturingLevel: 0,
+    logisticsLevel: 0,
     commerceLevel: 0,
     financeLevel: 0,
+    prospectingLevel: 0,
 
     // Social and military sector levels (0–100), built by spending on corresponding policies.
     // Effects come from accumulated levels, not current spending.
@@ -44,14 +46,25 @@ function initGame(empireName) {
     projectProgress: {},     // { projectId: $M invested so far }
     projectFunding: {},      // { projectId: $M/turn allocation }
 
-    // Trade routes — array of route objects { id, partnerId, maturity }
+    // Trade routes — array of route objects
+    // { id, nationId, exportItems:[{cat,volume}], importItems:[{cat,volume}], exportQuality, importQuality, maturity }
+    // exportQuality: what nation pays per export unit (0.25–1.2)
+    // importQuality: what player would pay per import unit (stored, Phase 3.5)
+    // Only exportItems generate income; importItems are placeholder until resources exist.
     tradeRoutes: [],
     nextTradeRouteId: 1,
+
+    // Active trade negotiation (null when not negotiating)
+    // { nationId, status:'drafting'|'awaiting'|'countered', pushCount,
+    //   exportItems:[{cat,volume}], importItems:[{cat,volume}],
+    //   threatenNext:bool, nationOffer:{exportQuality,importQuality}|null, isRenegotiation:bool }
+    activeNegotiation: null,
 
     // Funding 0-20 = percentage of tax income allocated to this policy
     policyFunding: {
       mining: 0,
       manufacturing: 0,
+      logistics: 0,
       commerce: 0,
       finance: 0,
       infrastructure: 0,
@@ -59,9 +72,35 @@ function initGame(empireName) {
       education: 0,
       military: 0,
       research: 0,
+      prospecting: 0,
     },
 
     unlockedTechs: [],
+
+    // Resource types unlocked via Industrial path techs (used by Phase 3.5 deposits)
+    // Iron and Coal are always discoverable (no tech required).
+    unlockedResources: [],
+
+    // Resource Deposits (Phase 3.5)
+    // deposits: array of in-development deposit objects. Statuses:
+    //   'anomaly'      — detected; type and potential unknown
+    //   'surveying'    — initial survey in progress; type still unknown
+    //   'commissioning'— type/tier known; building mine infrastructure (guaranteed, costs money)
+    //   'producing'    — mine is active and producing at currentTier
+    //   'upgrading'    — upgrade attempt in progress; production paused (25% success on completion)
+    // maxTier is hidden from the player until the deposit reaches it.
+    // Fields: { id, resourceType, currentTier, maxTier, status, developProgress }
+    deposits: [],
+
+    // Fully-developed deposits absorbed into the national industry pool.
+    // Keyed by resource type: { sites: N, totalOutput: N } (output in Mt/yr)
+    establishedIndustries: {},
+
+    // Global deposit development slider (one active deposit at a time).
+    depositDevelopment: {
+      activeDepositId: null,
+      funding: 0,   // $M/turn
+    },
 
     // AI nations — live state; static definitions are in NATIONS (data.js).
     // { [id]: { gdp, militaryLevel, relations } }

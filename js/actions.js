@@ -40,20 +40,338 @@ function setTaxRate(value) {
   renderHeader();
 }
 
-function openTradeRoute() {
-  const route = { id: G.nextTradeRouteId++, partnerId: null, maturity: 0 };
-  G.tradeRoutes.push(route);
-  addLog('Trade route #' + route.id + ' opened. Income ramps to +' + fmt(TRADE_ROUTE_INCOME_MAX) + '/turn over ' + TRADE_ROUTE_MATURITY_TURNS + ' turns.', 'good');
-  showNotification('\ud83d\udea2 Trade route #' + route.id + ' opened!', 'good');
+// ============================================================
+// TRADE NEGOTIATION
+// ============================================================
+
+const TRADE_CAT_NAMES = {
+  rawMaterials:      'Raw Materials',
+  manufacturedGoods: 'Manufactured Goods',
+  financialServices: 'Financial Services',
+};
+
+// Start a negotiation in drafting state. Pre-fills from existing route if renegotiating.
+function startTradeNegotiation(nationId) {
+  if (!G.nations[nationId]) return;
+  const existing = G.tradeRoutes.find(r => r.nationId === nationId);
+  G.activeNegotiation = {
+    nationId,
+    status:          'drafting',
+    pushCount:       0,
+    exportItems:     existing ? existing.exportItems.map(i => ({ ...i })) : [],
+    importItems:     existing ? existing.importItems.map(i => ({ ...i })) : [],
+    threatenNext:    false,
+    nationOffer:     null,
+    isRenegotiation: !!existing,
+  };
   renderAll();
+}
+
+function cancelTradeNegotiation() {
+  G.activeNegotiation = null;
+  renderAll();
+}
+
+function openNegotiationForNation(nationId) {
+  startTradeNegotiation(nationId);
+}
+
+function openNegotiationFromRoute(nationId) {
+  startTradeNegotiation(nationId);
+}
+
+// Set export volume for a category (0 = remove from list).
+function setNegotiationExportVolume(cat, volume) {
+  if (!G.activeNegotiation) return;
+  const max   = getTradeMaxVolume(G.activeNegotiation.nationId, cat, 'export');
+  const v     = Math.max(0, Math.min(parseInt(volume, 10) || 0, max));
+  const items = G.activeNegotiation.exportItems;
+  const idx   = items.findIndex(i => i.cat === cat);
+  if (v === 0)         { if (idx !== -1) items.splice(idx, 1); }
+  else if (idx !== -1) { items[idx].volume = v; }
+  else                 { items.push({ cat, volume: v }); }
+  renderAll();
+}
+
+// Set import volume for a category.
+function setNegotiationImportVolume(cat, volume) {
+  if (!G.activeNegotiation) return;
+  const max   = getTradeMaxVolume(G.activeNegotiation.nationId, cat, 'import');
+  const v     = Math.max(0, Math.min(parseInt(volume, 10) || 0, max));
+  const items = G.activeNegotiation.importItems;
+  const idx   = items.findIndex(i => i.cat === cat);
+  if (v === 0)         { if (idx !== -1) items.splice(idx, 1); }
+  else if (idx !== -1) { items[idx].volume = v; }
+  else                 { items.push({ cat, volume: v }); }
+  renderAll();
+}
+
+// Send drafted offer — nation responds at end of next turn.
+function proposeTradeOffer() {
+  if (!G.activeNegotiation || G.activeNegotiation.status !== 'drafting') return;
+  const neg  = G.activeNegotiation;
+  const name = NATIONS[neg.nationId].name;
+  if (neg.threatenNext) {
+    const relsCost = getPushRelationsCost(0, true);
+    G.nations[neg.nationId].relations = Math.max(0, G.nations[neg.nationId].relations - relsCost);
+    addLog('Trade offer sent to ' + name + ' with threat. Relations −' + relsCost + '.', 'warn');
+  } else {
+    addLog('Trade offer sent to ' + name + ' — awaiting response next turn.', 'info');
+  }
+  neg.status = 'awaiting';
+  renderAll();
+}
+
+// Push for better terms (from 'countered'). Applies relations cost immediately.
+function pushTradeNegotiation(threaten) {
+  if (!G.activeNegotiation || G.activeNegotiation.status !== 'countered') return;
+  const neg = G.activeNegotiation;
+  neg.pushCount++;
+  neg.threatenNext = !!threaten;
+  const relsCost = getPushRelationsCost(neg.pushCount, !!threaten);
+  G.nations[neg.nationId].relations = Math.max(0, G.nations[neg.nationId].relations - relsCost);
+  neg.status = 'awaiting';
+  const name = NATIONS[neg.nationId].name;
+  addLog(name + ': pushed terms' + (threaten ? ' with threat' : '') + '. Relations −' + relsCost + '.', 'warn');
+  renderAll();
+}
+
+// Toggle threaten flag (checkbox in UI).
+function toggleNegotiationThreat() {
+  if (!G.activeNegotiation) return;
+  G.activeNegotiation.threatenNext = !G.activeNegotiation.threatenNext;
+  renderAll();
+}
+
+// Accept the nation's counter offer and create or update the trade route.
+function acceptNationCounter() {
+  if (!G.activeNegotiation || !G.activeNegotiation.nationOffer) return;
+  const neg = G.activeNegotiation;
+  _finaliseTradeRoute(neg.nationId, neg.exportItems, neg.importItems, neg.nationOffer, neg.isRenegotiation);
+  G.activeNegotiation = null;
+  renderAll();
+}
+
+// Reject counter — go back to drafting so player can modify terms.
+function rejectNationCounter() {
+  if (!G.activeNegotiation) return;
+  G.activeNegotiation.status    = 'drafting';
+  G.activeNegotiation.nationOffer = null;
+  renderAll();
+}
+
+// Shared: create or update a trade route from finalised terms.
+function _finaliseTradeRoute(nationId, exportItems, importItems, offer, isRenegotiation) {
+  const { exportQuality, importQuality } = offer;
+  if (isRenegotiation) {
+    const route = G.tradeRoutes.find(r => r.nationId === nationId);
+    if (route) {
+      route.exportItems   = exportItems.map(i => ({ ...i }));
+      route.importItems   = importItems.map(i => ({ ...i }));
+      route.exportQuality = exportQuality;
+      route.importQuality = importQuality;
+    }
+    addLog('Trade deal with ' + NATIONS[nationId].name + ' renegotiated (export quality ' + (exportQuality * 100).toFixed(0) + '%).', 'good');
+    showNotification('🤝 Trade deal renegotiated with ' + NATIONS[nationId].name + '!', 'good');
+  } else {
+    G.tradeRoutes.push({
+      id:           G.nextTradeRouteId++,
+      nationId,
+      exportItems:  exportItems.map(i => ({ ...i })),
+      importItems:  importItems.map(i => ({ ...i })),
+      exportQuality,
+      importQuality,
+      maturity:     0,
+    });
+    const expNames = exportItems.length
+      ? exportItems.map(i => TRADE_CAT_NAMES[i.cat] + ' ×' + i.volume).join(', ')
+      : 'nothing';
+    addLog('Trade route opened with ' + NATIONS[nationId].name + ' — exporting ' + expNames + ' (quality ' + (exportQuality * 100).toFixed(0) + '%).', 'good');
+    showNotification('🚢 Trade route opened with ' + NATIONS[nationId].name + '!', 'good');
+  }
+}
+
+// Called during endTurn when activeNegotiation.status === 'awaiting'.
+function _processNegotiationResponse() {
+  const neg = G.activeNegotiation;
+  if (!neg) return;
+  const name = NATIONS[neg.nationId].name;
+
+  // Check straight-accept (only after at least one push)
+  if (neg.pushCount >= 1) {
+    const acceptChance = getStraightAcceptChance(neg.nationId, neg.pushCount);
+    if (Math.random() < acceptChance) {
+      const offer = getNationCounterOffer(neg.nationId, neg.pushCount, neg.threatenNext);
+      _finaliseTradeRoute(neg.nationId, neg.exportItems, neg.importItems, offer, neg.isRenegotiation);
+      addLog(name + ' accepted your trade terms outright!', 'good');
+      showNotification('🎉 ' + name + ' accepted your terms!', 'good');
+      G.activeNegotiation = null;
+      return;
+    }
+  }
+
+  // Check collapse (after at least one push, or if the initial offer included a threat)
+  if (neg.pushCount >= 1 || neg.threatenNext) {
+    const collapseRisk = getPushCollapseRisk(neg.nationId, neg.pushCount, neg.threatenNext);
+    if (Math.random() < collapseRisk) {
+      G.nations[neg.nationId].relations = Math.max(0, G.nations[neg.nationId].relations - 5);
+      addLog('Trade negotiations with ' + name + ' collapsed after ' + neg.pushCount + ' push' + (neg.pushCount !== 1 ? 'es' : '') + '. Relations −5.', 'bad');
+      showNotification('💔 Negotiations with ' + name + ' collapsed!', 'bad');
+      G.activeNegotiation = null;
+      return;
+    }
+  }
+
+  // Generate counter offer
+  const offer = getNationCounterOffer(neg.nationId, neg.pushCount, neg.threatenNext);
+  neg.nationOffer  = offer;
+  neg.status       = 'countered';
+  neg.threatenNext = false;
+  addLog(name + ' counter-offered: export quality ' + (offer.exportQuality * 100).toFixed(0) + '%, import price ' + (offer.importQuality * 100).toFixed(0) + '%.', 'info');
+  showNotification('💬 ' + name + ' made a counter-offer!', 'info');
 }
 
 function closeTradeRoute(routeId) {
   const idx = G.tradeRoutes.findIndex(r => r.id === routeId);
   if (idx === -1) return;
+  const route = G.tradeRoutes[idx];
+  const nationName = route.nationId && NATIONS[route.nationId] ? NATIONS[route.nationId].name : 'unknown';
   G.tradeRoutes.splice(idx, 1);
-  showNotification('Trade route #' + routeId + ' closed. (' + G.tradeRoutes.length + ' remaining)', 'info');
+  // Cancel any active negotiation with this nation too
+  if (G.activeNegotiation && G.activeNegotiation.nationId === route.nationId) {
+    G.activeNegotiation = null;
+  }
+  showNotification('Trade route with ' + nationName + ' closed.', 'info');
   renderAll();
+}
+
+// Resource Deposit actions (Phase 3.5) =====================================================
+
+// Set how much to spend per turn on the active deposit development ($M/turn).
+function setDepositDevelopmentFunding(amountStr) {
+  G.depositDevelopment.funding = Math.max(0, parseFloat(amountStr) || 0);
+  renderAll();
+}
+
+// Assign a deposit to receive development funding.
+// Starts the appropriate phase transition based on current status.
+function assignDepositDevelopment(depositId) {
+  const dep = G.deposits.find(d => d.id === depositId);
+  if (!dep) return;
+  if (dep.status === 'anomaly') {
+    dep.status = 'surveying';
+  } else if (dep.status === 'producing') {
+    if (!canUpgradeDeposit(dep)) {
+      showNotification('Research a deposit upgrade tech first.', 'error');
+      return;
+    }
+    dep.status = 'upgrading';
+  } else if (dep.status === 'surveying' || dep.status === 'commissioning' || dep.status === 'upgrading') {
+    // Resuming an in-progress phase — just redirect funding
+  } else {
+    return;
+  }
+  G.depositDevelopment.activeDepositId = depositId;
+  renderAll();
+}
+
+// Cancel an upgrade attempt, restoring production (loses all progress).
+function cancelDepositUpgrade(depositId) {
+  const dep = G.deposits.find(d => d.id === depositId);
+  if (!dep || dep.status !== 'upgrading') return;
+  dep.status = 'producing';
+  dep.developProgress = 0;
+  if (G.depositDevelopment.activeDepositId === depositId) {
+    G.depositDevelopment.activeDepositId = null;
+  }
+  addLog('\u26cf\ufe0f Upgrade attempt cancelled. Progress lost.', 'warn');
+  renderAll();
+}
+
+// Absorb a fully-developed deposit into the national industry pool and remove it from active list.
+function _poolDeposit(dep) {
+  const resType      = dep.resourceType;
+  const output       = DEPOSIT_TIER_OUTPUT[dep.currentTier] || 0;
+  const provinceName = dep.regionId && MAP_REGIONS.player.provinces[dep.regionId]
+    ? MAP_REGIONS.player.provinces[dep.regionId].name
+    : '';
+  if (!G.establishedIndustries[resType]) {
+    G.establishedIndustries[resType] = { sites: 0, totalOutput: 0 };
+  }
+  G.establishedIndustries[resType].sites       += 1;
+  G.establishedIndustries[resType].totalOutput += output;
+  G.deposits = G.deposits.filter(d => d.id !== dep.id);
+  G.depositDevelopment.activeDepositId = null;
+  addLog('\u2699\ufe0f ' + RESOURCE_TYPES[resType].name + ' mine (' + dep.currentTier
+    + (provinceName ? ', ' + provinceName : '')
+    + ') fully established — absorbed into national industry. +'
+    + output + ' Mt/yr (permanent). Province slot freed.', 'good');
+  showNotification('\u2699\ufe0f ' + RESOURCE_TYPES[resType].name + ' mine fully established!', 'good');
+}
+
+// Internal: called when deposit development progress reaches 100%.
+function _completeDepositStep(dep) {
+  const TIER_ORDER = ['occurrence', 'vein', 'deposit', 'reserve', 'majorReserve'];
+
+  if (dep.status === 'surveying') {
+    // Survey complete — reveal resource type, enter commissioning at occurrence level
+    const availTypes = getAvailableResourceTypes();
+    dep.resourceType    = availTypes.length > 0
+      ? availTypes[Math.floor(Math.random() * availTypes.length)]
+      : 'iron'; // fallback if no types unlocked
+    dep.currentTier     = 'occurrence';
+    dep.status          = 'commissioning';
+    dep.developProgress = 0;
+    // Keep activeDepositId so funding continues into commissioning
+    addLog('\u26cf\ufe0f Survey complete: ' + RESOURCE_TYPES[dep.resourceType].name
+      + ' occurrence identified. Now commissioning the mine (\u2212$'
+      + DEPOSIT_COMMISSION_COST.occurrence + 'M).', 'good');
+    showNotification('\u26cf\ufe0f ' + RESOURCE_TYPES[dep.resourceType].name + ' occurrence found — commissioning…', 'good');
+
+  } else if (dep.status === 'commissioning') {
+    // Commissioning complete — mine is now producing. If at max tier, pool it.
+    dep.developProgress = 0;
+    G.depositDevelopment.activeDepositId = null;
+    if (dep.currentTier === dep.maxTier) {
+      _poolDeposit(dep); // also logs
+    } else {
+      dep.status = 'producing';
+      addLog('\u26cf\ufe0f ' + RESOURCE_TYPES[dep.resourceType].name + ' mine commissioned ('
+        + dep.currentTier + '). Now producing ' + DEPOSIT_TIER_OUTPUT[dep.currentTier] + ' Mt/yr.', 'good');
+      showNotification('\u2713 ' + RESOURCE_TYPES[dep.resourceType].name + ' mine online — '
+        + DEPOSIT_TIER_OUTPUT[dep.currentTier] + ' Mt/yr.', 'good');
+    }
+
+  } else if (dep.status === 'upgrading') {
+    G.depositDevelopment.activeDepositId = null;
+    const atMax   = dep.currentTier === dep.maxTier;
+    const success = !atMax && Math.random() < DEPOSIT_UPGRADE_SUCCESS;
+
+    if (atMax) {
+      // Deposit is already at its geological max — reveal and pool
+      dep.status          = 'commissioning';
+      dep.developProgress = 0;
+      addLog('\u26cf\ufe0f Expansion surveys complete: this ' + RESOURCE_TYPES[dep.resourceType].name
+        + ' deposit has reached its full geological potential. Finalising…', 'info');
+      // Let commissioning completion handle pooling
+    } else if (success) {
+      const nextTier = TIER_ORDER[TIER_ORDER.indexOf(dep.currentTier) + 1];
+      dep.currentTier     = nextTier;
+      dep.status          = 'commissioning';
+      dep.developProgress = 0;
+      addLog('\u26cf\ufe0f Upgrade successful: ' + RESOURCE_TYPES[dep.resourceType].name
+        + ' deposit expanded to ' + nextTier + '. Commissioning new infrastructure (\u2212$'
+        + DEPOSIT_COMMISSION_COST[nextTier] + 'M)…', 'good');
+      showNotification('\u2191 ' + RESOURCE_TYPES[dep.resourceType].name + ' expanded to '
+        + nextTier + ' — commissioning…', 'good');
+    } else {
+      // Failure — store 5% partial progress, resume production
+      dep.status          = 'producing';
+      dep.developProgress = 5;
+      addLog('\u26cf\ufe0f Upgrade attempt failed. Partial surveys stored (5%). Retry to continue.', 'warn');
+      showNotification('\u26cf\ufe0f Upgrade failed — retry at 5% progress.', 'warn');
+    }
+  }
 }
 
 function setActiveResearch(techId) {
@@ -112,25 +430,46 @@ function endTurn() {
   G.gdpPerCapita = G.gdpPerCapita * (1 + growth);
   G.gdp = G.population * G.gdpPerCapita / 1000;
 
-  // 1.3. Update economic sector levels (Mining, Manufacturing, Commerce, Finance)
+  // 1.3. Update economic sector levels (Mining, Manufacturing, Commerce, Finance, Logistics)
   // Each sector grows with spending and decays 1 level/turn without it.
-  for (const sector of ['mining', 'manufacturing', 'commerce', 'finance']) {
-    const levelKey = sector + 'Level';
-    if (G.policyFunding[sector] > 0) {
-      const spend    = getTaxIncome() * (G.policyFunding[sector] / 100);
-      const growRate = SECTOR_GROW_PER_M / (1 + SECTOR_GROW_HARDNESS * G[levelKey]);
-      const net      = spend * growRate - SECTOR_DECAY;
-      G[levelKey]    = Math.min(100, Math.max(0, G[levelKey] + net));
-    } else if (G[levelKey] > 0) {
-      G[levelKey] = Math.max(0, G[levelKey] - SECTOR_DECAY);
+  // Industrial sectors (mining, manufacturing) use industrialGrowthMult/industrialDecayMult from tech.
+  // Locked policies (requiresTech not yet researched) are skipped.
+  {
+    const te = getTechEffects();
+    for (const sector of ['mining', 'manufacturing', 'logistics', 'prospecting', 'commerce', 'finance']) {
+      const levelKey = sector + 'Level';
+      const policyDef = POLICIES[sector];
+      const isLocked = policyDef && policyDef.requiresTech && !G.unlockedTechs.includes(policyDef.requiresTech);
+      if (isLocked) {
+        // Decay still applies if level was somehow set from a previous run
+        if (G[levelKey] > 0) G[levelKey] = Math.max(0, G[levelKey] - SECTOR_DECAY);
+        continue;
+      }
+      const isIndustrial = (sector === 'mining' || sector === 'manufacturing');
+      const growMult  = isIndustrial ? te.industrialGrowthMult  : 1.0;
+      const decayMult = isIndustrial ? te.industrialDecayMult   : 1.0;
+      if (G.policyFunding[sector] > 0) {
+        const spend    = getTaxIncome() * (G.policyFunding[sector] / 100);
+        const growRate = SECTOR_GROW_PER_M / (1 + SECTOR_GROW_HARDNESS * G[levelKey]) * growMult;
+        const net      = spend * growRate - SECTOR_DECAY * decayMult;
+        G[levelKey]    = Math.min(100, Math.max(0, G[levelKey] + net));
+      } else if (G[levelKey] > 0) {
+        G[levelKey] = Math.max(0, G[levelKey] - SECTOR_DECAY * decayMult);
+      }
     }
   }
 
-  // Manufacturing import cost: if Manufacturing level exceeds Mining, raw materials must be imported
+  // Manufacturing import cost: if Manufacturing level exceeds Mining, raw materials must be imported.
+  // Logistics level reduces this penalty by up to 100%.
   if (G.manufacturingLevel > G.miningLevel) {
-    const manufacturingImportCost = (G.manufacturingLevel - G.miningLevel) * MANUFACTURING_IMPORT_COST_PER_LEVEL;
-    G.treasury -= manufacturingImportCost;
-    addLog('Manufacturing import cost: −' + fmt(manufacturingImportCost) + ' (Mining gap: ' + Math.round(G.manufacturingLevel - G.miningLevel) + ' levels)', 'bad');
+    const logisticsReduction = Math.min(1.0, G.logisticsLevel / 100);
+    const rawCost = (G.manufacturingLevel - G.miningLevel) * MANUFACTURING_IMPORT_COST_PER_LEVEL;
+    const manufacturingImportCost = rawCost * (1 - logisticsReduction);
+    if (manufacturingImportCost > 0) {
+      G.treasury -= manufacturingImportCost;
+      const logLabel = logisticsReduction > 0 ? ' (' + Math.round(logisticsReduction * 100) + '% mitigated by Logistics)' : '';
+      addLog('Manufacturing import cost: −' + fmt(manufacturingImportCost) + ' (Mining gap: ' + Math.round(G.manufacturingLevel - G.miningLevel) + ' levels)' + logLabel, 'bad');
+    }
   }
 
   // 1.4. Update infrastructure level
@@ -208,7 +547,7 @@ function endTurn() {
   const net = getNetIncome();
   G.treasury += net;
 
-  // 2.4. Trade route income — maturity-based, ramps linearly over TRADE_ROUTE_MATURITY_TURNS
+  // 2.4. Trade route income — maturity ramps over TRADE_ROUTE_MATURITY_TURNS
   if (G.tradeRoutes.length > 0) {
     let routeIncome = 0;
     for (const route of G.tradeRoutes) {
@@ -217,6 +556,11 @@ function endTurn() {
     }
     G.treasury += routeIncome;
     if (routeIncome > 0) addLog('Trade route income: +' + fmt(routeIncome) + ' (' + G.tradeRoutes.length + ' route' + (G.tradeRoutes.length !== 1 ? 's' : '') + ')', 'good');
+  }
+
+  // 2.4b. Active negotiation — process nation response if player is awaiting
+  if (G.activeNegotiation?.status === 'awaiting') {
+    _processNegotiationResponse();
   }
 
   // 2.5. Apply scaling interest on treasury
@@ -242,12 +586,89 @@ function endTurn() {
       G.unlockedTechs.push(G.activeResearch);
       addLog('Research complete: ' + activeTech.name + ' — ' + activeTech.effects.effectDesc, 'good');
       showNotification('✓ ' + activeTech.name + ' research complete!', 'good');
+      // Process unlocks
+      if (activeTech.unlocks) {
+        if (activeTech.unlocks.resources) {
+          for (const r of activeTech.unlocks.resources) {
+            if (!G.unlockedResources.includes(r)) {
+              G.unlockedResources.push(r);
+            }
+          }
+        }
+        if (activeTech.unlocks.policies) {
+          for (const p of activeTech.unlocks.policies) {
+            if (POLICIES[p]) addLog('🔓 Policy unlocked: ' + POLICIES[p].name, 'good');
+          }
+        }
+      }
       G.activeResearch = null;
       G.researchProgress = 0;
     }
   }
 
-  // 5. Military strength — derived from militaryLevel via getMilitaryStrength() (engine.js)
+  // 4.5. Prospect roll — fires when prospectingLevel > 0
+  // getProspectChance() returns 0 if all province slots are full
+  if (G.prospectingLevel > 0) {
+    const freeProvinces = getFreeSlotProvinces();
+    if (freeProvinces.length > 0) {
+      const chance = getProspectChance();
+      if (Math.random() < chance) {
+        // Assign to a random province that still has a free slot
+        const provinceId = freeProvinces[Math.floor(Math.random() * freeProvinces.length)];
+        const provinceName = MAP_REGIONS.player.provinces[provinceId].name;
+        // Pick a random max tier using weighted distribution
+        const tiers = ['occurrence', 'vein', 'deposit', 'reserve', 'majorReserve'];
+        const weights = DEPOSIT_MAX_TIER_WEIGHTS;
+        const totalW = weights.reduce((s, w) => s + w, 0);
+        let roll = Math.random() * totalW;
+        let maxTier = tiers[tiers.length - 1];
+        for (let i = 0; i < weights.length; i++) {
+          roll -= weights[i];
+          if (roll <= 0) { maxTier = tiers[i]; break; }
+        }
+        const anomalyId = 'dep_' + G.turn + '_' + Math.floor(Math.random() * 9999);
+        G.deposits.push({
+          id: anomalyId,
+          regionId: provinceId,
+          resourceType: null,
+          currentTier: null,
+          maxTier,
+          status: 'anomaly',
+          developProgress: 0,
+        });
+        addLog('\u26cf\ufe0f Geological anomaly detected in ' + provinceName + '. Assign Development funding to begin a survey.', 'good');
+        showNotification('\u26cf\ufe0f Anomaly in ' + provinceName + ' \u2014 assign development to survey!', 'good');
+      }
+    }
+  }
+
+  // 4.6. Deposit development — fund the active deposit, decay unfunded in-progress deposits
+  {
+    const activeId = G.depositDevelopment.activeDepositId;
+    const funding  = G.depositDevelopment.funding;
+    if (activeId && funding > 0) {
+      const dep = G.deposits.find(d => d.id === activeId);
+      if (dep && dep.status !== 'producing') {
+        const cost = getDepositDevelopCost(dep);
+        if (cost > 0) {
+          const remaining = cost * (1 - dep.developProgress / 100);
+          const spent     = Math.min(funding, remaining);
+          G.treasury     -= spent;
+          dep.developProgress = Math.min(100, dep.developProgress + (spent / cost) * 100);
+          if (dep.developProgress >= 100) {
+            _completeDepositStep(dep);
+          }
+        }
+      }
+    }
+    // Decay progress on in-progress deposits that are not actively funded
+    for (const dep of G.deposits) {
+      if ((dep.status === 'surveying' || dep.status === 'commissioning' || dep.status === 'upgrading')
+          && dep.id !== activeId) {
+        dep.developProgress = Math.max(0, dep.developProgress - DEPOSIT_PROGRESS_DECAY);
+      }
+    }
+  }
 
   // 6. Advance time
   G.year++;

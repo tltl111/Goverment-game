@@ -11,6 +11,7 @@ const POLICIES = {
     icon: '⛏️',
     description: 'Extract raw materials to power the economy. Grows Mining level, boosting GDP growth.',
     maxFunding: 20,
+    requiresTech: 'industrialisation',
     effects: {}
   },
   manufacturing: {
@@ -20,6 +21,17 @@ const POLICIES = {
     icon: '🏭',
     description: 'Convert raw materials into goods. Effective output is capped by Mining level.',
     maxFunding: 20,
+    requiresTech: 'steelProduction',
+    effects: {}
+  },
+  logistics: {
+    id: 'logistics',
+    name: 'Logistics',
+    category: 'economy',
+    icon: '🚛',
+    description: 'Streamline supply chains and distribution. Grows Logistics level, reducing the manufacturing import cost penalty.',
+    maxFunding: 20,
+    requiresTech: 'massProduction',
     effects: {}
   },
   commerce: {
@@ -85,6 +97,33 @@ const POLICIES = {
     maxFunding: 20,
     effects: {}
   },
+  prospecting: {
+    id: 'prospecting',
+    name: 'Prospecting',
+    category: 'economy',
+    icon: '⛏️',
+    description: 'Fund geological surveys and exploration teams. Builds Prospecting level, increasing the chance of discovering a resource deposit each turn.',
+    maxFunding: 20,
+    effects: {}
+  },
+};
+
+// ============================================================
+// RESOURCE_TYPES — static definitions for all resource types
+// requiresTech: the Industrial path tech that unlocks this type for discovery.
+//   null = always discoverable. Once the tech is researched, the resource ID is
+//   added to G.unlockedResources, and Prospecting can find deposits of that type.
+// ============================================================
+const RESOURCE_TYPES = {
+  iron:      { id: 'iron',      name: 'Iron',           tier: 'raw',       requiresTech: null,                icon: '🪨' },
+  coal:      { id: 'coal',      name: 'Coal',           tier: 'raw',       requiresTech: null,                icon: '🖤' },
+  timber:    { id: 'timber',    name: 'Timber',         tier: 'raw',       requiresTech: 'industrialisation', icon: '🪵' },
+  steel:     { id: 'steel',     name: 'Steel',          tier: 'processed', requiresTech: 'steelProduction',   icon: '⚙️' },
+  oil:       { id: 'oil',       name: 'Oil',            tier: 'raw',       requiresTech: 'chemicalIndustry',  icon: '🛢️' },
+  chemicals: { id: 'chemicals', name: 'Chemicals',      tier: 'processed', requiresTech: 'chemicalIndustry',  icon: '⚗️' },
+  copper:    { id: 'copper',    name: 'Copper',         tier: 'raw',       requiresTech: 'electronics',       icon: '🔶' },
+  silicon:   { id: 'silicon',   name: 'Silicon',        tier: 'processed', requiresTech: 'electronics',       icon: '💡' },
+  rareEarths:{ id: 'rareEarths',name: 'Rare Earth Metals', tier: 'rare',   requiresTech: 'nanotechnology',    icon: '✨' },
 };
 
 const TECHNOLOGIES = {
@@ -233,6 +272,119 @@ const TECHNOLOGIES = {
     unlocks: null,
     effects: { gdpGrowthBonus: 0.005, infraGrowthMult: 1.20, effectDesc: '+0.5% GDP growth, +20% infrastructure growth rate' }
   },
+
+  // ============================================================
+  // INDUSTRIAL PATH
+  // ============================================================
+  industrialisation: {
+    id: 'industrialisation', name: 'Industrialisation',
+    tier: 2, path: 'industrial', cost: 40, icon: '🏗️',
+    description: 'Formal industrial processes enable systematic resource extraction.',
+    requires: ['basicAutomation'],
+    unlocks: { policies: ['mining'], resources: ['timber'] },
+    effects: { effectDesc: 'Unlocks Mining policy + Timber deposits' }
+  },
+  steelProduction: {
+    id: 'steelProduction', name: 'Steel Production',
+    tier: 3, path: 'industrial', cost: 70, icon: '⚙️',
+    description: 'Mastery of steel enables large-scale goods manufacturing.',
+    requires: ['industrialisation'],
+    unlocks: { policies: ['manufacturing'], resources: ['steel'] },
+    effects: { effectDesc: 'Unlocks Manufacturing policy + Steel deposits' }
+  },
+  massProduction: {
+    id: 'massProduction', name: 'Mass Production',
+    tier: 4, path: 'industrial', cost: 100, icon: '🏭',
+    description: 'Standardised manufacturing and logistics enable goods at scale.',
+    requires: ['steelProduction'],
+    unlocks: { policies: ['logistics'] },
+    effects: { effectDesc: 'Unlocks Logistics policy' }
+  },
+  heavyIndustry: {
+    id: 'heavyIndustry', name: 'Heavy Industry',
+    tier: 5, path: 'industrial', cost: 150, icon: '🔩',
+    description: 'Massive industrial operations power the modern economy.',
+    requires: ['massProduction'],
+    unlocks: null,
+    effects: { industrialGrowthMult: 1.20, gdpGrowthBonus: 0.01, effectDesc: '+1% GDP growth, industry grows 20% faster' }
+  },
+  chemicalIndustry: {
+    id: 'chemicalIndustry', name: 'Chemical Industry',
+    tier: 6, path: 'industrial', cost: 200, icon: '⚗️',
+    description: 'Industrial chemistry enables plastics, fertilisers, and advanced materials.',
+    requires: ['heavyIndustry'],
+    unlocks: { resources: ['oil', 'chemicals'] },
+    effects: { effectDesc: 'Unlocks Oil + Chemicals deposits' }
+  },
+  electronics: {
+    id: 'electronics', name: 'Electronics',
+    tier: 6, path: 'industrial', cost: 200, icon: '💡',
+    description: 'Electronic components are the foundation of modern industry and computing.',
+    requires: ['heavyIndustry'],
+    unlocks: { resources: ['copper', 'silicon'] },
+    effects: { gdpGrowthBonus: 0.005, effectDesc: '+0.5% GDP growth, unlocks Copper + Silicon deposits' }
+  },
+  advancedManufacturing: {
+    id: 'advancedManufacturing', name: 'Advanced Manufacturing',
+    tier: 7, path: 'industrial', cost: 280, icon: '🔧',
+    description: 'Precision tooling and automation drastically cut industrial losses.',
+    requires: ['electronics', 'massProduction'],
+    unlocks: null,
+    effects: { industrialDecayMult: 0.70, effectDesc: 'Industry decay rate −30%' }
+  },
+  robotics: {
+    id: 'robotics', name: 'Robotics',
+    tier: 8, path: 'industrial', cost: 400, icon: '🤖',
+    description: 'Robotic systems replace manual labour, accelerating all industry.',
+    requires: ['advancedManufacturing'],
+    unlocks: null,
+    effects: { industrialGrowthMult: 1.40, industrialDecayMult: 0.80, gdpGrowthBonus: 0.015, effectDesc: '+1.5% GDP growth, industry grows 40% faster, decay −20%' }
+  },
+  nanotechnology: {
+    id: 'nanotechnology', name: 'Nanotechnology',
+    tier: 9, path: 'industrial', cost: 600, icon: '🔬',
+    description: 'Nanoscale engineering opens new resource and manufacturing possibilities.',
+    requires: ['robotics'],
+    unlocks: { resources: ['rareEarths'] },
+    effects: { gdpGrowthBonus: 0.01, effectDesc: '+1% GDP growth, unlocks Rare Earth Metals deposits' }
+  },
+
+  // ============================================================
+  // MINING SUB-BRANCH — deposit upgrade unlock techs
+  // Each tech unlocks the next tier of deposit upgrades via G.unlockedTechs checks.
+  // ============================================================
+  prospectingMethods: {
+    id: 'prospectingMethods', name: 'Prospecting Methods',
+    tier: 3, path: 'industrial', cost: 60, icon: '🗺️',
+    description: 'Systematic geological survey methods enable targeted deposit development.',
+    requires: ['industrialisation'],
+    unlocks: null,
+    effects: { effectDesc: 'Enables Trace → Small deposit upgrades' }
+  },
+  industrialMining: {
+    id: 'industrialMining', name: 'Industrial Mining',
+    tier: 5, path: 'industrial', cost: 130, icon: '🪨',
+    description: 'Industrial-scale extraction equipment unlocks larger subsurface deposits.',
+    requires: ['prospectingMethods', 'massProduction'],
+    unlocks: null,
+    effects: { effectDesc: 'Enables Small → Medium deposit upgrades' }
+  },
+  openPitMining: {
+    id: 'openPitMining', name: 'Open-Pit Mining',
+    tier: 7, path: 'industrial', cost: 260, icon: '⛰️',
+    description: 'Open-pit excavation unlocks extraction of large deep deposits.',
+    requires: ['industrialMining'],
+    unlocks: null,
+    effects: { effectDesc: 'Enables Medium → Large deposit upgrades' }
+  },
+  deepVeinExtraction: {
+    id: 'deepVeinExtraction', name: 'Deep Vein Extraction',
+    tier: 9, path: 'industrial', cost: 520, icon: '🔩',
+    description: 'Deep drilling systems tap into the largest possible mineral veins.',
+    requires: ['openPitMining', 'robotics'],
+    unlocks: null,
+    effects: { effectDesc: 'Enables Large → Vast deposit upgrades' }
+  },
 };
 
 // ============================================================
@@ -351,12 +503,19 @@ const PROJECTS = {
 // Live state is stored in G.nations (see state.js).
 // ============================================================
 const NATIONS = {
+  // demand: how much this nation wants to import from the player (>1 = high demand = player earns more)
+  // supply: how well this nation can supply the player's imports (>1 = abundant = player saves more)
+  // Categories: rawMaterials, manufacturedGoods, financialServices
   valdoria: {
     id: 'valdoria', name: 'Valdoria',
     gdp: 800,
     militaryLevel: 20,
     gdpGrowthRate: 0.020,
     adjacency: ['player', 'sorenia', 'orzhan'],
+    trade: {
+      demand: { rawMaterials: 0.8,  manufacturedGoods: 1.2, financialServices: 0.9 },
+      supply: { rawMaterials: 1.4,  manufacturedGoods: 0.8, financialServices: 0.7 },
+    },
   },
   kethara: {
     id: 'kethara', name: 'Kethara',
@@ -364,6 +523,10 @@ const NATIONS = {
     militaryLevel: 35,
     gdpGrowthRate: 0.030,
     adjacency: ['player', 'sorenia', 'marveth'],
+    trade: {
+      demand: { rawMaterials: 1.2,  manufacturedGoods: 0.8, financialServices: 1.4 },
+      supply: { rawMaterials: 0.8,  manufacturedGoods: 1.6, financialServices: 1.0 },
+    },
   },
   orzhan: {
     id: 'orzhan', name: 'Orzhan',
@@ -371,6 +534,10 @@ const NATIONS = {
     militaryLevel: 70,
     gdpGrowthRate: 0.010,
     adjacency: ['valdoria', 'nocthar', 'durenna'],
+    trade: {
+      demand: { rawMaterials: 1.5,  manufacturedGoods: 1.0, financialServices: 0.6 },
+      supply: { rawMaterials: 0.7,  manufacturedGoods: 0.9, financialServices: 0.5 },
+    },
   },
   sorenia: {
     id: 'sorenia', name: 'Sorenia',
@@ -378,6 +545,10 @@ const NATIONS = {
     militaryLevel: 10,
     gdpGrowthRate: 0.020,
     adjacency: ['valdoria', 'kethara'],
+    trade: {
+      demand: { rawMaterials: 0.9,  manufacturedGoods: 1.3, financialServices: 1.2 },
+      supply: { rawMaterials: 1.2,  manufacturedGoods: 0.9, financialServices: 1.1 },
+    },
   },
   iravan: {
     id: 'iravan', name: 'Iravan',
@@ -385,6 +556,10 @@ const NATIONS = {
     militaryLevel: 40,
     gdpGrowthRate: 0.020,
     adjacency: ['marveth', 'nocthar', 'durenna'],
+    trade: {
+      demand: { rawMaterials: 1.1,  manufacturedGoods: 0.9, financialServices: 0.8 },
+      supply: { rawMaterials: 1.6,  manufacturedGoods: 0.7, financialServices: 0.6 },
+    },
   },
   durenna: {
     id: 'durenna', name: 'Durenna',
@@ -392,6 +567,10 @@ const NATIONS = {
     militaryLevel: 35,
     gdpGrowthRate: 0.025,
     adjacency: ['orzhan', 'nocthar', 'iravan'],
+    trade: {
+      demand: { rawMaterials: 1.4,  manufacturedGoods: 1.1, financialServices: 0.5 },
+      supply: { rawMaterials: 1.0,  manufacturedGoods: 0.8, financialServices: 0.4 },
+    },
   },
   marveth: {
     id: 'marveth', name: 'Marveth',
@@ -399,6 +578,10 @@ const NATIONS = {
     militaryLevel: 20,
     gdpGrowthRate: 0.015,
     adjacency: ['player', 'kethara', 'iravan'],
+    trade: {
+      demand: { rawMaterials: 0.7,  manufacturedGoods: 1.5, financialServices: 1.1 },
+      supply: { rawMaterials: 0.9,  manufacturedGoods: 1.3, financialServices: 0.8 },
+    },
   },
   nocthar: {
     id: 'nocthar', name: 'Nocthar',
@@ -406,6 +589,10 @@ const NATIONS = {
     militaryLevel: 55,
     gdpGrowthRate: 0.015,
     adjacency: ['player', 'orzhan', 'iravan', 'durenna'],
+    trade: {
+      demand: { rawMaterials: 1.0,  manufacturedGoods: 0.8, financialServices: 0.7 },
+      supply: { rawMaterials: 1.1,  manufacturedGoods: 1.0, financialServices: 0.9 },
+    },
   },
 };
 
@@ -474,10 +661,10 @@ const MAP_REGIONS = {
     labelX: 393, labelY: 262,
     capitalX: 393, capitalY: 248,
     provinces: {
-      arvenmoor: { name: 'Arvenmoor', points: '280,195 395,198 395,278 275,278', color: '#1a5898', labelX: 333, labelY: 240 },
-      caldrath:  { name: 'Caldrath',  points: '395,198 510,200 510,278 395,278', color: '#205ea8', labelX: 452, labelY: 240 },
-      thornhaven:{ name: 'Thornhaven',points: '275,278 395,278 390,358 270,360', color: '#184898', labelX: 326, labelY: 320 },
-      selmark:   { name: 'Selmark',   points: '395,278 510,278 510,355 390,358', color: '#2860b0', labelX: 450, labelY: 318 },
+      arvenmoor: { name: 'Arvenmoor', size: 'capital', points: '280,195 395,198 395,278 275,278', color: '#1a5898', labelX: 333, labelY: 240 },
+      caldrath:  { name: 'Caldrath',  size: 'medium',  points: '395,198 510,200 510,278 395,278', color: '#205ea8', labelX: 452, labelY: 240 },
+      thornhaven:{ name: 'Thornhaven',size: 'medium',  points: '275,278 395,278 390,358 270,360', color: '#184898', labelX: 326, labelY: 320 },
+      selmark:   { name: 'Selmark',   size: 'medium',  points: '395,278 510,278 510,355 390,358', color: '#2860b0', labelX: 450, labelY: 318 },
     },
   },
 };

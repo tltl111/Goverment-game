@@ -9,6 +9,144 @@ let _mapDragMoved = false;  // distinguishes drag from click
 let _mapSelectedNation = null;
 let _mapDocListenersAttached = false;
 
+// ============================================================
+// NEGOTIATION PANEL — shared helper, used in trade tab + map panel
+// ============================================================
+function _buildNegotiationPanel(neg) {
+  const def      = NATIONS[neg.nationId];
+  const ns       = G.nations[neg.nationId];
+  const leverage = getTradeNegotiationLeverage(neg.nationId);
+  const leverStr = leverage >= 1.5 ? 'Strong' : leverage >= 0.8 ? 'Neutral' : 'Weak';
+  const leverCls = leverage >= 1.5 ? 'stat-pos' : leverage < 0.8 ? 'stat-neg' : '';
+  const relLabel = ns.relations >= 65 ? 'Friendly' : ns.relations <= 35 ? 'Hostile' : 'Neutral';
+  const relCls   = ns.relations >= 65 ? 'stat-pos' : ns.relations <= 35 ? 'stat-neg' : '';
+  const CATS     = ['rawMaterials', 'manufacturedGoods', 'financialServices'];
+  const CN       = { rawMaterials: 'Raw Materials', manufacturedGoods: 'Manuf. Goods', financialServices: 'Financial Svc' };
+  const fmt2     = v => fmt(v);
+
+  if (neg.status === 'drafting') {
+    const exportRows = CATS.map(cat => {
+      const maxVol = getTradeMaxVolume(neg.nationId, cat, 'export');
+      const curVol = (neg.exportItems.find(i => i.cat === cat) || { volume: 0 }).volume;
+      return `<div class="neg-vol-row">
+        <span class="neg-vol-label">${CN[cat]}</span>
+        <input type="range" min="0" max="${maxVol}" value="${curVol}" class="neg-vol-slider"
+          oninput="setNegotiationExportVolume('${cat}',this.value)">
+        <input type="number" min="0" max="${maxVol}" value="${curVol}" class="neg-vol-input"
+          onchange="setNegotiationExportVolume('${cat}',this.value)">
+        <span class="neg-vol-max">/${maxVol}</span>
+      </div>`;
+    }).join('');
+    const importRows = CATS.map(cat => {
+      const maxVol = getTradeMaxVolume(neg.nationId, cat, 'import');
+      const curVol = (neg.importItems.find(i => i.cat === cat) || { volume: 0 }).volume;
+      return `<div class="neg-vol-row">
+        <span class="neg-vol-label">${CN[cat]}</span>
+        <input type="range" min="0" max="${maxVol}" value="${curVol}" class="neg-vol-slider"
+          oninput="setNegotiationImportVolume('${cat}',this.value)">
+        <input type="number" min="0" max="${maxVol}" value="${curVol}" class="neg-vol-input"
+          onchange="setNegotiationImportVolume('${cat}',this.value)">
+        <span class="neg-vol-max">/${maxVol}</span>
+      </div>`;
+    }).join('');
+    const draftIncome = (neg.exportItems || []).reduce((s, { cat, volume }) =>
+      s + volume * TRADE_EXPORT_INCOME_PER_UNIT * 0.5, 0);
+    const threatened    = neg.threatenNext;
+    const threatRelCost = getPushRelationsCost(0, true);
+    const threatCollapse = getPushCollapseRisk(neg.nationId, 0, true);
+    const threatColCls  = threatCollapse >= 0.3 ? 'stat-neg' : threatCollapse >= 0.1 ? 'effect-neutral' : 'stat-pos';
+    const threatQBonus  = (TRADE_OFFER_QUALITY_THREATEN * 100).toFixed(0);
+    return `<div class="neg-panel">
+      <div class="neg-header">
+        <span class="neg-title">Negotiating with ${def.name}</span>
+        <span class="neg-badge">Drafting</span>
+      </div>
+      <div class="neg-meta">
+        Relations: <span class="${relCls}">${ns.relations.toFixed(0)} — ${relLabel}</span>
+        &nbsp;·&nbsp; Leverage: <span class="${leverCls}">${leverStr} (${leverage.toFixed(2)}×)</span>
+      </div>
+      <div class="neg-section-label">You export <em>(income)</em></div>
+      ${exportRows}
+      <div class="neg-section-label" style="margin-top:6px">You import <em>(Phase 3.5 — no cost yet)</em></div>
+      ${importRows}
+      ${draftIncome > 0 ? `<div class="neg-income-hint">~+${fmt2(draftIncome)}/turn at 50% quality</div>` : ''}
+      <div class="neg-push-section">
+        <label class="neg-threat-toggle">
+          <input type="checkbox" ${threatened ? 'checked' : ''} onchange="toggleNegotiationThreat()">
+          Include Threat <span class="neg-threat-hint">(+${threatQBonus}% quality, Relations −${threatRelCost}, Collapse ${(threatCollapse * 100).toFixed(0)}%)</span>
+        </label>
+      </div>
+      <div class="neg-actions">
+        <button class="btn btn-green" onclick="proposeTradeOffer()">Propose Offer</button>
+        <button class="btn btn-muted" onclick="cancelTradeNegotiation()">Cancel</button>
+      </div>
+    </div>`;
+  }
+
+  if (neg.status === 'awaiting') {
+    return `<div class="neg-panel">
+      <div class="neg-header">
+        <span class="neg-title">Negotiating with ${def.name}</span>
+        <span class="neg-badge neg-badge-wait">Awaiting…</span>
+      </div>
+      <div class="neg-waiting">Offer sent — ${def.name} will respond at end of turn.</div>
+      <div class="neg-actions">
+        <button class="btn btn-muted" onclick="cancelTradeNegotiation()">Cancel</button>
+      </div>
+    </div>`;
+  }
+
+  if (neg.status === 'countered') {
+    const offer      = neg.nationOffer;
+    const projIncome = (neg.exportItems || []).reduce((s, { cat, volume }) =>
+      s + volume * TRADE_EXPORT_INCOME_PER_UNIT * offer.exportQuality, 0);
+    const nextPush      = neg.pushCount + 1;
+    const threatened    = neg.threatenNext;
+    const collapseRisk  = getPushCollapseRisk(neg.nationId, nextPush, threatened);
+    const relsCost      = getPushRelationsCost(nextPush, threatened);
+    const nextOffer     = getNationCounterOffer(neg.nationId, nextPush, threatened);
+    const colCls        = collapseRisk >= 0.3 ? 'stat-neg' : collapseRisk >= 0.1 ? 'effect-neutral' : 'stat-pos';
+    const expSummary    = neg.exportItems.map(i => `${i.volume}× ${CN[i.cat]}`).join(', ') || '—';
+    const impSummary    = neg.importItems.map(i => `${i.volume}× ${CN[i.cat]}`).join(', ') || '—';
+    return `<div class="neg-panel">
+      <div class="neg-header">
+        <span class="neg-title">Negotiating with ${def.name}</span>
+        <span class="neg-badge neg-badge-counter">Counter Offer</span>
+      </div>
+      <div class="neg-meta">
+        Leverage: <span class="${leverCls}">${leverStr} (${leverage.toFixed(2)}×)</span>
+        &nbsp;·&nbsp; Pushes so far: ${neg.pushCount}
+      </div>
+      <div class="neg-offer-box">
+        <div class="neg-offer-row"><span>You export</span><span>${expSummary}</span></div>
+        <div class="neg-offer-row"><span>You import</span><span>${impSummary}</span></div>
+        <div class="neg-offer-row"><span>Export price</span><span class="stat-pos">${(offer.exportQuality * 100).toFixed(0)}%</span></div>
+        <div class="neg-offer-row"><span>Import price</span><span class="effect-neutral">${(offer.importQuality * 100).toFixed(0)}% <em>(Phase 3.5)</em></span></div>
+        <div class="neg-offer-row"><span>Income at maturity</span><span class="stat-pos">+${fmt2(projIncome)}/turn</span></div>
+      </div>
+      <div class="neg-push-section">
+        <label class="neg-threat-toggle">
+          <input type="checkbox" ${threatened ? 'checked' : ''} onchange="toggleNegotiationThreat()">
+          Include Threat <span class="neg-threat-hint">(+${(TRADE_OFFER_QUALITY_THREATEN*100).toFixed(0)}% quality, extra relations cost)</span>
+        </label>
+        <div class="neg-push-costs">
+          <span>Relations: <span class="stat-neg">−${relsCost}</span></span>
+          <span>Collapse risk: <span class="${colCls}">${(collapseRisk * 100).toFixed(0)}%</span></span>
+          <span>Next quality: ${(nextOffer.exportQuality * 100).toFixed(0)}%</span>
+        </div>
+        <button class="btn" onclick="pushTradeNegotiation(${threatened})">Push for Better Terms →</button>
+      </div>
+      <div class="neg-actions">
+        <button class="btn btn-green" onclick="acceptNationCounter()">Accept Deal</button>
+        <button class="btn" onclick="rejectNationCounter()">Modify Offer</button>
+        <button class="btn btn-muted" onclick="cancelTradeNegotiation()">Cancel</button>
+      </div>
+    </div>`;
+  }
+
+  return '';
+}
+
 function renderAll() {
   renderHeader();
   renderPolicies();
@@ -117,6 +255,8 @@ function buildEffectsHint(policyId) {
     infrastructure:  [['↑ Infra level', 'good'], ['↑ GDP growth', 'good'], ['↑ pop cap', 'good']],
     mining:          [['↑ Mining level', 'good'], ['↑ GDP growth', 'good']],
     manufacturing:   [['↑ Mfg level', 'good'], ['↑ GDP growth', 'good'], ['capped by Mining', 'neutral']],
+    logistics:       [['↑ Logistics level', 'good'], ['↓ mfg import cost', 'good']],
+    prospecting:     [['↑ Prospecting level', 'good'], ['↑ deposit chance/turn', 'good']],
     commerce:        [['↑ Commerce level', 'good'], ['↑ GDP growth', 'good'], ['amplified by Mfg', 'neutral']],
     finance:         [['↑ Finance level', 'good'], ['↓ debt cost', 'good']],
     healthcare:      [['↑ Healthcare level', 'good'], ['↑ pop growth', 'good'], ['↑ happiness', 'good']],
@@ -225,26 +365,43 @@ function renderDashboard() {
   }
 
   if (tab === 'trade-routes') {
-    const count   = G.tradeRoutes.length;
-    const totalIncome = getTotalTradeIncome();
-    const routeIncomeTotal = count > 0 ? ' · +' + fmt(totalIncome) + '/turn' : '';
+    const count        = G.tradeRoutes.length;
+    const totalIncome  = getTotalTradeIncome();
+    const routeTotal   = count > 0 ? ' · +' + fmt(totalIncome) + '/turn' : '';
+    const CN           = { rawMaterials: 'Raw Materials', manufacturedGoods: 'Manuf. Goods', financialServices: 'Financial Svc' };
+
+    const negotiationHtml = G.activeNegotiation ? _buildNegotiationPanel(G.activeNegotiation) : '';
+    const hintHtml = !G.activeNegotiation
+      ? `<div class="tr-hint">Select a nation on the <strong>World</strong> map to open trade negotiations.</div>`
+      : '';
 
     let routeListHtml = '';
     if (count === 0) {
-      routeListHtml = '<div class="tr-empty">No active routes. Open one to start earning trade income.</div>';
+      routeListHtml = '<div class="tr-empty">No active trade routes.</div>';
     } else {
       for (const route of G.tradeRoutes) {
-        const routeIncome = getTradeRouteIncome(route);
-        const maturityPct = Math.min(100, (route.maturity / TRADE_ROUTE_MATURITY_TURNS) * 100).toFixed(0);
+        const routeIncome  = getTradeRouteIncome(route);
+        const maturityPct  = Math.min(100, (route.maturity / TRADE_ROUTE_MATURITY_TURNS) * 100).toFixed(0);
+        const nationName   = NATIONS[route.nationId]?.name || 'Unknown';
+        const expLabel     = (route.exportItems || []).length
+          ? route.exportItems.map(i => i.volume + '× ' + CN[i.cat]).join(', ')
+          : '—';
+        const impLabel     = (route.importItems || []).length
+          ? route.importItems.map(i => i.volume + '× ' + CN[i.cat]).join(', ')
+          : '—';
+        const eqLabel      = route.exportQuality ? (route.exportQuality * 100).toFixed(0) + '%' : '—';
+        const isNegotiating = G.activeNegotiation?.nationId === route.nationId;
         routeListHtml += `
           <div class="tr-route-card">
             <div class="tr-route-info">
-              <span class="tr-route-id">Route #${route.id}</span>
-              <span class="tr-route-partner">Partner: <em>TBD</em></span>
-              <span class="tr-route-age">${route.maturity} turn${route.maturity !== 1 ? 's' : ''} old · ${maturityPct}% mature</span>
+              <span class="tr-route-partner">${nationName}</span>
+              <span class="tr-route-cats">Export: ${expLabel}</span>
+              <span class="tr-route-cats">Import: ${impLabel}</span>
+              <span class="tr-route-age">${route.maturity} turn${route.maturity !== 1 ? 's' : ''} · ${maturityPct}% mature · Quality ${eqLabel}</span>
             </div>
             <div class="tr-route-right">
               <span class="tr-route-income">+${fmt(routeIncome)}/turn</span>
+              ${!isNegotiating ? `<button class="btn-tr-renegotiate" onclick="openNegotiationFromRoute('${route.nationId}')">Renegotiate</button>` : ''}
               <button class="btn-tr-close-route" onclick="closeTradeRoute(${route.id})">✕</button>
             </div>
           </div>`;
@@ -256,14 +413,10 @@ function renderDashboard() {
         <div class="tr-header">
           <span class="tr-icon">🚢</span>
           <span class="tr-title">Trade Routes</span>
-          <span class="tr-slots">${count} active${routeIncomeTotal}</span>
+          <span class="tr-slots">${count} active${routeTotal}</span>
         </div>
-        <p class="tr-desc">Routes are free to open. Income ramps from $0 to <strong>+${fmt(TRADE_ROUTE_INCOME_MAX)}/turn</strong> over ${TRADE_ROUTE_MATURITY_TURNS} turns as the route matures. Closing a route resets its maturity.</p>
-        <div class="tr-actions">
-          <button class="btn-tr-open" onclick="openTradeRoute()">
-            Open Route
-          </button>
-        </div>
+        ${negotiationHtml}
+        ${hintHtml}
         <div class="tr-route-list">${routeListHtml}</div>
       </div>`;
   }
@@ -421,7 +574,7 @@ function renderDashboard() {
   if (tab === 'research') {
     const rp = getRpPerTurn();
     const ceiling = getResearchCapacityCeiling();
-    const tiers = [1, 2, 3, 4];
+    const tiers = [...new Set(Object.values(TECHNOLOGIES).map(t => t.tier))].sort((a, b) => a - b);
     let html = `
       <div class="research-tab-header">
         <span class="research-tab-stat">🔬 Research level ${G.researchLevel.toFixed(1)} / ${ceiling}</span>
@@ -596,6 +749,258 @@ function renderDashboard() {
   if (tab === 'world') {
     renderWorldMap();
   }
+
+  if (tab === 'resources') {
+    renderResourcesTab();
+  }
+}
+
+// ============================================================
+// RESOURCES TAB (Phase 3.5)
+// ============================================================
+
+function renderResourcesTab() {
+  const el = document.getElementById('tab-resources');
+  if (!el) return;
+
+  const TIER_ORDER  = ['occurrence', 'vein', 'deposit', 'reserve', 'majorReserve'];
+  const TIER_LABEL  = { occurrence: 'Occurrence', vein: 'Vein', deposit: 'Deposit', reserve: 'Reserve', majorReserve: 'Major Reserve' };
+  const available   = getAvailableResourceTypes();
+  const prod        = getResourceProduction();
+  const chance      = (getProspectChance() * 100).toFixed(1);
+  const activeId    = G.depositDevelopment.activeDepositId;
+  const funding     = G.depositDevelopment.funding;
+
+  // --- Development control panel ---
+  const activeDep = activeId ? G.deposits.find(d => d.id === activeId) : null;
+  let activeLabel = 'None — click a deposit below to assign development';
+  let progressPct = 0;
+  let progressDesc = '';
+  if (activeDep) {
+    const rt = activeDep.resourceType ? RESOURCE_TYPES[activeDep.resourceType].name : 'Unknown';
+    if (activeDep.status === 'surveying') {
+      activeLabel  = 'Initial Survey (type unknown)';
+      progressPct  = activeDep.developProgress;
+      progressDesc = `$${DEPOSIT_SURVEY_COST}M total · ${progressPct.toFixed(0)}% complete`;
+    } else if (activeDep.status === 'commissioning') {
+      const commCost = DEPOSIT_COMMISSION_COST[activeDep.currentTier] || 0;
+      activeLabel  = `${rt} — Commissioning ${TIER_LABEL[activeDep.currentTier]}`;
+      progressPct  = activeDep.developProgress;
+      progressDesc = `$${commCost}M total · ${progressPct.toFixed(0)}% complete · Guaranteed`;
+    } else if (activeDep.status === 'upgrading') {
+      const upgCost  = DEPOSIT_TIER_UPGRADE_COST[activeDep.currentTier] || 0;
+      const nextTier = TIER_ORDER[TIER_ORDER.indexOf(activeDep.currentTier) + 1] || '?';
+      activeLabel  = `${rt} — ${TIER_LABEL[activeDep.currentTier]} → ${TIER_LABEL[nextTier] || nextTier} expansion`;
+      progressPct  = activeDep.developProgress;
+      progressDesc = `$${upgCost}M total · ${progressPct.toFixed(0)}% complete · 25% success`;
+    }
+  }
+
+  const devHtml = `
+    <div class="res-section">
+      <div class="res-section-title">Development</div>
+      <div class="res-dev-row">
+        <span class="res-stat-label">Active</span>
+        <span class="res-stat-value">${activeLabel}</span>
+      </div>
+      ${activeDep ? `
+        <div class="res-progress-bar-wrap">
+          <div class="res-progress-bar" style="width:${progressPct.toFixed(0)}%"></div>
+        </div>
+        <div class="res-progress-desc">${progressDesc}</div>
+      ` : ''}
+      <div class="res-dev-row res-dev-slider-row">
+        <span class="res-stat-label">Funding</span>
+        <input type="range" min="0" max="50" step="1" value="${funding}"
+          oninput="setDepositDevelopmentFunding(this.value)">
+        <span class="res-stat-value">$${funding}M/turn</span>
+      </div>
+      ${funding === 0 && activeDep ? '<p class="res-hint" style="margin-top:6px">⚠ Funding is 0 — set slider above 0 to make progress.</p>' : ''}
+    </div>`;
+
+  // --- Prospecting status + province capacity ---
+  const provinceRows = Object.entries(MAP_REGIONS.player.provinces).map(([provId, prov]) => {
+    const used = getRegionActiveDepositCount(provId);
+    const cap  = getRegionCapacity(provId);
+    const full = used >= cap;
+    const pips = Array.from({ length: cap }, (_, i) =>
+      `<span class="res-slot-pip ${i < used ? 'used' : ''}"></span>`
+    ).join('');
+    return `<div class="res-stat-row">
+      <span class="res-stat-label">${prov.name}${prov.size === 'capital' ? ' ★' : ''}</span>
+      <span class="res-province-slots">${pips}</span>
+      <span class="res-stat-value ${full ? 'res-slots-full' : ''}">${used}/${cap}</span>
+    </div>`;
+  }).join('');
+
+  const allFull = getFreeSlotProvinces().length === 0;
+  const prospHtml = `
+    <div class="res-section">
+      <div class="res-section-title">Prospecting</div>
+      <div class="res-stat-row"><span class="res-stat-label">Prospecting Level</span><span class="res-stat-value">${Math.round(G.prospectingLevel)} / 100</span></div>
+      <div class="res-stat-row"><span class="res-stat-label">Discovery chance / turn</span><span class="res-stat-value ${allFull ? 'res-slots-full' : ''}">${allFull ? '0% (all provinces full)' : chance + '%'}</span></div>
+      <div class="res-stat-row"><span class="res-stat-label">Discoverable types</span><span class="res-stat-value">${available.map(id => RESOURCE_TYPES[id].name).join(', ') || 'None yet'}</span></div>
+      <div class="res-section-subtitle" style="margin-top:8px;margin-bottom:4px;font-size:11px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Province Slots</div>
+      ${provinceRows}
+      ${allFull ? '<p class="res-hint" style="margin-top:6px">⚠ All province slots occupied. Fully establish mines to free slots for new discoveries.</p>' : ''}
+      <p class="res-hint">Fund the <strong>Prospecting</strong> policy (Economy tab) to increase discovery chance each turn.</p>
+    </div>`;
+
+  // --- Active deposits (anomaly / surveying / commissioning / producing / upgrading) ---
+  let depositsHtml = '';
+  if (G.deposits.length > 0) {
+    const cards = G.deposits.map(dep => {
+      const isActive     = dep.id === activeId;
+      const rt           = dep.resourceType ? RESOURCE_TYPES[dep.resourceType] : null;
+      const icon         = rt ? rt.icon : '❓';
+      const name         = rt ? rt.name : 'Unknown';
+      const provinceName = dep.regionId && MAP_REGIONS.player.provinces[dep.regionId]
+        ? MAP_REGIONS.player.provinces[dep.regionId].name : '';
+      const regionTag    = provinceName ? ` · <span class="res-region-tag">${provinceName}</span>` : '';
+      const devCost      = getDepositDevelopCost(dep);
+      const congestion   = dep.regionId ? getRegionCongestionMultiplier(dep) : 1;
+      const congTag      = congestion > 1 ? ` · <span class="res-congestion-tag">+${Math.round((congestion-1)*100)}% congestion</span>` : '';
+
+      if (dep.status === 'anomaly') {
+        const canAssign = !activeId || activeId === dep.id;
+        return `<div class="res-deposit-card res-deposit-anomaly">
+          <span class="res-deposit-card-icon">❓</span>
+          <div class="res-deposit-card-info">
+            <span class="res-deposit-card-name">Geological Anomaly${regionTag}</span>
+            <span class="res-deposit-card-sub">Type unknown · Potential unknown · Survey: $${devCost}M${congTag}</span>
+          </div>
+          <div class="res-deposit-card-actions">
+            <button class="res-btn res-btn-confirm ${canAssign ? '' : 'disabled'}"
+              onclick="${canAssign ? `assignDepositDevelopment('${dep.id}')` : ''}"
+              ${canAssign ? '' : 'disabled'}>
+              ${isActive ? 'Assigned' : 'Start Survey'}
+            </button>
+          </div>
+        </div>`;
+      }
+
+      if (dep.status === 'surveying') {
+        const prog = dep.developProgress.toFixed(0);
+        return `<div class="res-deposit-card res-deposit-inprogress ${isActive ? 'res-deposit-active' : ''}">
+          <span class="res-deposit-card-icon">🔍</span>
+          <div class="res-deposit-card-info">
+            <span class="res-deposit-card-name">Geological Survey in progress…${regionTag}</span>
+            <span class="res-deposit-card-sub">$${devCost}M total · ${prog}% complete${congTag}${!isActive ? ' · <em>Unfunded — progress decaying</em>' : ''}</span>
+          </div>
+          ${!isActive ? `<div class="res-deposit-card-actions">
+            <button class="res-btn res-btn-confirm" onclick="assignDepositDevelopment('${dep.id}')">Resume</button>
+          </div>` : ''}
+        </div>`;
+      }
+
+      if (dep.status === 'commissioning') {
+        const prog    = dep.developProgress.toFixed(0);
+        const tierLbl = TIER_LABEL[dep.currentTier] || dep.currentTier;
+        return `<div class="res-deposit-card res-deposit-inprogress ${isActive ? 'res-deposit-active' : ''}">
+          <span class="res-deposit-card-icon">${icon}</span>
+          <div class="res-deposit-card-info">
+            <span class="res-deposit-card-name">${name} — Commissioning ${tierLbl} mine${regionTag}</span>
+            <span class="res-deposit-card-sub">$${devCost}M total · ${prog}% complete${congTag}${!isActive ? ' · <em>Unfunded — decaying</em>' : ' · Guaranteed'}</span>
+          </div>
+          ${!isActive ? `<div class="res-deposit-card-actions">
+            <button class="res-btn res-btn-confirm" onclick="assignDepositDevelopment('${dep.id}')">Resume</button>
+          </div>` : ''}
+        </div>`;
+      }
+
+      if (dep.status === 'producing') {
+        const output      = DEPOSIT_TIER_OUTPUT[dep.currentTier];
+        const tierLbl     = TIER_LABEL[dep.currentTier] || dep.currentTier;
+        const canUp       = canUpgradeDeposit(dep);
+        const hasProgress = dep.developProgress > 0;
+        const upgCostTag  = canUp ? ` · Expand: $${getDepositDevelopCost({...dep, status:'upgrading'})}M` : '';
+        return `<div class="res-deposit-card res-deposit-producing">
+          <span class="res-deposit-card-icon">${icon}</span>
+          <div class="res-deposit-card-info">
+            <span class="res-deposit-card-name">${name}${regionTag}</span>
+            <span class="res-deposit-card-sub">
+              <span class="res-deposit-tier res-deposit-tier-${dep.currentTier}">${tierLbl}</span>
+              · ${output} Mt/yr${congTag}${upgCostTag}
+              ${hasProgress ? ` · <span class="res-partial">Partial expansion: ${dep.developProgress.toFixed(0)}%</span>` : ''}
+            </span>
+          </div>
+          ${canUp ? `<div class="res-deposit-card-actions">
+            <button class="res-btn res-btn-confirm" onclick="assignDepositDevelopment('${dep.id}')">Expand</button>
+          </div>` : `<div class="res-deposit-card-actions">
+            <span class="res-btn-locked" title="Requires deposit expansion tech">🔒 Expand</span>
+          </div>`}
+        </div>`;
+      }
+
+      if (dep.status === 'upgrading') {
+        const prog       = dep.developProgress.toFixed(0);
+        const nextIdx    = TIER_ORDER.indexOf(dep.currentTier) + 1;
+        const nextTier   = TIER_ORDER[nextIdx];
+        const nextLabel  = TIER_LABEL[nextTier] || nextTier || '?';
+        const currentLbl = TIER_LABEL[dep.currentTier] || dep.currentTier;
+        return `<div class="res-deposit-card res-deposit-inprogress ${isActive ? 'res-deposit-active' : ''}">
+          <span class="res-deposit-card-icon">${icon}</span>
+          <div class="res-deposit-card-info">
+            <span class="res-deposit-card-name">${name} — Expanding ${currentLbl} → ${nextLabel}${regionTag}</span>
+            <span class="res-deposit-card-sub">$${devCost}M total · ${prog}% complete${congTag}${!isActive ? ' · <em>Unfunded — decaying</em>' : ' · 25% success on completion'}</span>
+          </div>
+          <div class="res-deposit-card-actions">
+            ${!isActive ? `<button class="res-btn res-btn-confirm" onclick="assignDepositDevelopment('${dep.id}')">Resume</button>` : ''}
+            <button class="res-btn res-btn-dismiss" onclick="cancelDepositUpgrade('${dep.id}')">Cancel</button>
+          </div>
+        </div>`;
+      }
+
+      return '';
+    }).join('');
+
+    depositsHtml = `
+      <div class="res-section">
+        <div class="res-section-title">Active Sites (${G.deposits.length})</div>
+        <div class="res-deposits-list">${cards}</div>
+      </div>`;
+  }
+
+  // --- Established Industries (pooled max-tier deposits) ---
+  let industriesHtml = '';
+  const industryEntries = Object.entries(G.establishedIndustries || {});
+  if (industryEntries.length > 0) {
+    const rows = industryEntries.map(([resId, ind]) => {
+      const rt = RESOURCE_TYPES[resId];
+      return `<div class="res-industry-row">
+        <span class="res-industry-icon">${rt ? rt.icon : '⚙'}</span>
+        <span class="res-industry-name">${rt ? rt.name : resId} Industry</span>
+        <span class="res-industry-sites">${ind.sites} site${ind.sites !== 1 ? 's' : ''}</span>
+        <span class="res-industry-output">+${ind.totalOutput} Mt/yr</span>
+      </div>`;
+    }).join('');
+    industriesHtml = `
+      <div class="res-section">
+        <div class="res-section-title">⚙ Established Industries</div>
+        <div class="res-industry-list">${rows}</div>
+      </div>`;
+  }
+
+  // --- Production summary (all sources) ---
+  let prodHtml = '';
+  const prodEntries = Object.entries(prod);
+  if (prodEntries.length > 0) {
+    const rows = prodEntries.map(([id, rate]) => {
+      const rt = RESOURCE_TYPES[id];
+      return `<div class="res-prod-row"><span>${rt ? rt.icon + ' ' + rt.name : id}</span><span class="res-prod-rate">+${rate} Mt/yr</span></div>`;
+    }).join('');
+    prodHtml = `
+      <div class="res-section">
+        <div class="res-section-title">Total Production</div>
+        <div class="res-prod-list">${rows}</div>
+      </div>`;
+  }
+
+  const emptyMsg = G.deposits.length === 0 && industryEntries.length === 0
+    ? `<p class="res-empty">No anomalies found yet. Fund the Prospecting policy to begin searching.</p>`
+    : '';
+
+  el.innerHTML = `<div class="resources-panel">${devHtml}${prospHtml}${depositsHtml}${industriesHtml}${prodHtml}${emptyMsg}</div>`;
 }
 
 // ============================================================
@@ -637,12 +1042,45 @@ function renderWorldMap() {
   // --- Info panel for selected nation ---
   let infoHtml = '';
   if (_mapSelectedNation && G.nations[_mapSelectedNation]) {
-    const ns  = G.nations[_mapSelectedNation];
-    const def = NATIONS[_mapSelectedNation];
-    const reg = MAP_REGIONS[_mapSelectedNation];
+    const id   = _mapSelectedNation;
+    const ns   = G.nations[id];
+    const def  = NATIONS[id];
+    const reg  = MAP_REGIONS[id];
     const relLabel = ns.relations >= 65 ? 'Friendly' : ns.relations <= 35 ? 'Hostile' : 'Neutral';
     const relCls   = ns.relations >= 65 ? 'stat-pos'  : ns.relations <= 35 ? 'stat-neg'  : '';
     const borders  = (def.adjacency || []).map(a => a === 'player' ? G.empire : (NATIONS[a] ? NATIONS[a].name : a)).join(', ');
+    const activeRoute   = G.tradeRoutes.find(r => r.nationId === id);
+    const isNegotiating = G.activeNegotiation?.nationId === id;
+    const CN = { rawMaterials: 'Raw Materials', manufacturedGoods: 'Manuf. Goods', financialServices: 'Financial Svc' };
+
+    // Trade section
+    let tradeHtml = '';
+    if (isNegotiating) {
+      tradeHtml = _buildNegotiationPanel(G.activeNegotiation);
+    } else if (activeRoute) {
+      const income = getTradeRouteIncome(activeRoute);
+      const matPct = Math.min(100, (activeRoute.maturity / TRADE_ROUTE_MATURITY_TURNS) * 100).toFixed(0);
+      const expLbl = (activeRoute.exportItems || []).length
+        ? activeRoute.exportItems.map(i => i.volume + '× ' + CN[i.cat]).join(', ') : '—';
+      const impLbl = (activeRoute.importItems || []).length
+        ? activeRoute.importItems.map(i => i.volume + '× ' + CN[i.cat]).join(', ') : '—';
+      const eqLbl  = activeRoute.exportQuality ? (activeRoute.exportQuality * 100).toFixed(0) + '%' : '—';
+      tradeHtml = `
+        <div class="map-trade-active">
+          <div class="map-trade-status">🚢 Active Trade Route</div>
+          <div class="map-trade-detail">Export: ${expLbl}</div>
+          <div class="map-trade-detail">Import: ${impLbl}</div>
+          <div class="map-trade-detail">Quality ${eqLbl} · ${matPct}% mature · +${fmt(income)}/turn</div>
+          <button class="btn btn-sm" onclick="openNegotiationFromRoute('${id}')">Renegotiate</button>
+          <button class="btn btn-sm btn-muted" onclick="closeTradeRoute(${activeRoute.id})">Close Route</button>
+        </div>`;
+    } else {
+      tradeHtml = `
+        <div class="map-trade-none">
+          <button class="btn btn-green" onclick="openNegotiationForNation('${id}')">Negotiate Trade Deal</button>
+        </div>`;
+    }
+
     infoHtml = `
       <div class="map-info-panel">
         <div class="map-info-nation" style="border-left:3px solid ${reg.color}">
@@ -654,14 +1092,17 @@ function renderWorldMap() {
           <div class="map-info-item"><div class="map-info-label">Relations</div><div class="map-info-val ${relCls}">${ns.relations.toFixed(0)} \u2014 ${relLabel}</div></div>
           <div class="map-info-item map-info-item-wide"><div class="map-info-label">Borders</div><div class="map-info-val">${borders}</div></div>
         </div>
+        ${tradeHtml}
       </div>`;
   }
 
   panelEl.innerHTML = `
     <div class="world-map-container">
-      <svg id="world-map-svg" viewBox="${vbStr}" preserveAspectRatio="xMidYMid meet" class="world-map-svg">
-        ${svg}
-      </svg>
+      <div class="world-map-svg-wrap">
+        <svg id="world-map-svg" viewBox="${vbStr}" preserveAspectRatio="xMidYMid meet" class="world-map-svg">
+          ${svg}
+        </svg>
+      </div>
       ${infoHtml}
     </div>`;
 
@@ -703,7 +1144,6 @@ function _mapOnWheel(e) {
 
 function _mapOnMouseDown(e) {
   if (e.button !== 0) return;
-  e.preventDefault();
   const rect = e.currentTarget.getBoundingClientRect();
   _mapDrag = { startClientX: e.clientX, startClientY: e.clientY,
                startVBX: _mapVB.x, startVBY: _mapVB.y,

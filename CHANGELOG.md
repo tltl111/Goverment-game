@@ -4,6 +4,104 @@ All notable changes to Government Simulator will be documented here.
 
 ---
 
+## [0.14.0] — Phase 3.5: Resource Deposits
+
+### Added
+- **Resources tab** — new dashboard tab with deposit cards, province slot indicators, and established industries list
+- **Deposit system** — 5-tier geological progression: Occurrence (1 Mt/yr) → Vein (5) → Deposit (15) → Reserve (40) → Major Reserve (100)
+- **Three-phase mine flow**: Anomaly → Survey ($50M guaranteed) → Commissioning (tier-based cost) → Producing; mine halts during upgrade attempts
+- **Upgrade mechanic**: 25% success chance; failure returns 5% partial progress and resumes Producing; success restarts Commissioning at the next tier
+- **Pooling**: mines that complete Commissioning at max tier graduate into `establishedIndustries` — slot freed, output accumulates permanently
+- **Provincial deposit slots**: each province has a capacity (Capital: 4, Medium: 2); when all slots are full, prospecting stops; slot usage shown as pip indicators
+- **Regional congestion**: +20% development cost per other active deposit in the same province; displayed per-card in yellow
+- **Province visibility**: each deposit card shows the province it occupies; anomaly roll assigns to a random province with a free slot
+- **Established Industries panel**: shows pooled resource types, site count, and aggregate Mt/yr output
+
+### Constants
+- `DEPOSIT_TIER_OUTPUT`, `DEPOSIT_COMMISSION_COST`, `DEPOSIT_TIER_UPGRADE_COST`, `DEPOSIT_UPGRADE_SUCCESS`, `DEPOSIT_PROGRESS_DECAY`, `DEPOSIT_MAX_TIER_WEIGHTS`, `PROSPECT_BASE_CHANCE`, `PROSPECT_LEVEL_SCALE`, `PROSPECT_DIMINISH_RATE`, `DEPOSIT_SURVEY_COST`
+
+---
+
+## [0.13.0] — Phase 3.4: Tech Unlock Mechanic + Industrial Path
+
+### Added
+- **Industrial tech path** (9 techs): Industrialisation → Steel Production → Mass Production → Heavy Industry → Chemical Industry → Electronics → Advanced Manufacturing → Robotics → Nanotechnology
+- **Mining sub-branch** (4 techs): Prospecting Methods (T3) → Industrial Mining (T5) → Open-Pit Mining (T7) → Deep Vein Extraction (T9); each unlocks the next deposit-tier upgrade
+- **Tech unlock system**: techs using the `unlocks` field correctly gate downstream panels; an in-game notification fires when a new panel is unlocked
+
+---
+
+## [0.12.0] — Phase 3.3 redesign
+
+### Changed — Trade Negotiation System (complete redesign)
+- **Volume sliders** replace checkboxes: each category now has a range/number input for units exported/imported, capped by the nation's demand/supply profile (`TRADE_VOLUME_BASE × multiplier`)
+- **Turn-based responses**: proposing an offer sets status to `awaiting`; the nation responds at end of turn via `_processNegotiationResponse()`. No more instant round cycling
+- **Counter-offers** replace round acceptance: the nation returns `{ exportQuality, importQuality }` based on leverage, push count, and threat
+- **Push from counter-offer**: player can push after seeing the nation's counter, paying a relations cost immediately; relations cost scales with push count and whether a threat was included
+- **Threaten toggle**: checkbox in the countered panel — enabling it boosts export quality gained but adds collapse risk and extra relations damage
+- **Collapse risk**: if the player has pushed at least once, each response has a `getPushCollapseRisk()` chance of the negotiations collapsing (relations −5)
+- **Straight-accept** chance: after ≥1 push, high-leverage + good-relations nations may accept your terms outright (best outcome) before any counter is made
+- **Reject counter** → returns to drafting so player can modify volumes
+- **Income formula**: `volume × TRADE_EXPORT_INCOME_PER_UNIT × exportQuality × maturityMult`; import income removed until Phase 3.5
+- Shared `_buildNegotiationPanel(neg)` renders the same panel in both the Trade Routes tab and the World map info panel
+- Route cards now display `exportItems`/`importItems` volume arrays and `exportQuality` instead of flat category lists and `dealQuality`
+
+### Removed
+- `toggleNegotiationExport`, `toggleNegotiationImport`, `acceptTradeNegotiation` (replaced by new flow)
+- `getTradeNegotiationMaxRounds` engine function
+- Old `TRADE_DEAL_*`, `TRADE_ROUTE_BASE_EXPORT`, `TRADE_ROUTE_BASE_IMPORT` constants
+- Old round-based negotiation expiry in endTurn (replaced by `_processNegotiationResponse`)
+- Old CSS: `.tr-negotiation-panel`, `.tr-neg-*`, `.map-trade-negotiation`, `.map-neg-*` (replaced by `.neg-*`)
+
+---
+
+## [0.11.0] — 2026-05-05
+
+### Added — Trade Negotiation System (Phase 3.3)
+- **Multi-round trade negotiations** replace the old "Open Route" button
+- Click any nation on the World map → "Negotiate Trade Deal" opens an inline negotiation panel
+- Choose **export** and **import** goods categories: Raw Materials, Manufactured Goods, Financial Services
+- Accept the current deal or **push for better terms** (uses extra rounds to improve deal quality)
+- **Leverage** determines how strong your position is: `clamp(militaryLevel / nationMilitaryLevel × relations/50, 0.1, 3.0)`
+- **Max rounds** = `ceil(relations/20)` — hostile nations grant 1 round; friendly nations up to 4–5
+- **Deal quality** improves with leverage and patience: `clamp(0.4 + (leverage/3)×0.4 + (round−1)×0.1, 0.3, 1.2)`
+- **Route income** = export income + import saving, both scaled by nation demand/supply profiles and maturity
+- Demand/supply profiles (scale 0.5–2.0) added to all 8 NATIONS entries in `data.js`
+- **Renegotiation** updates route terms in-place and **preserves maturity**
+- Active negotiations expire at end of turn if the final round is unused
+- Trade Routes tab redesigned: shows active negotiation at top, route cards with nation name/categories/income/maturity
+- Negotiation panel shown inline in the World map nation info panel
+- Added shared CSS button utilities: `.btn`, `.btn-green`, `.btn-muted`, `.btn-sm`
+
+### Removed
+- `openTradeRoute()` action (replaced by negotiation flow)
+- `TRADE_ROUTE_INCOME_MAX` constant (replaced by `TRADE_ROUTE_BASE_EXPORT` / `TRADE_ROUTE_BASE_IMPORT`)
+
+---
+
+
+### Added — Trade Negotiation System (Phase 3.3)
+- **Multi-round trade negotiations** replace the old "Open Route" button
+- Click any nation on the World map → "Negotiate Trade Deal" opens an inline negotiation panel
+- Choose **export** and **import** goods categories: Raw Materials, Manufactured Goods, Financial Services
+- Accept the current deal or **push for better terms** (uses extra rounds to improve deal quality)
+- **Leverage** determines how strong your position is: `clamp(militaryLevel / nationMilitaryLevel × relations/50, 0.1, 3.0)`
+- **Max rounds** = `ceil(relations/20)` — hostile nations grant 1 round; friendly nations up to 4–5
+- **Deal quality** improves with leverage and patience: `clamp(0.4 + (leverage/3)×0.4 + (round−1)×0.1, 0.3, 1.2)`
+- **Route income** = export income + import saving, both scaled by nation demand/supply profiles and maturity
+- Demand/supply profiles (scale 0.5–2.0) added to all 8 NATIONS entries in `data.js`
+- **Renegotiation** updates route terms in-place and **preserves maturity**
+- Active negotiations expire at end of turn if the final round is unused
+- Trade Routes tab redesigned: shows active negotiation at top, route cards with nation name/categories/income/maturity
+- Negotiation panel shown inline in the World map nation info panel
+- Added shared CSS button utilities: `.btn`, `.btn-green`, `.btn-muted`, `.btn-sm`
+
+### Removed
+- `openTradeRoute()` action (replaced by negotiation flow)
+- `TRADE_ROUTE_INCOME_MAX` constant (replaced by `TRADE_ROUTE_BASE_EXPORT` / `TRADE_ROUTE_BASE_IMPORT`)
+
+---
+
 ## [0.10.0] — 2026-05-05
 
 ### Added — World Map (Phase 3.2)

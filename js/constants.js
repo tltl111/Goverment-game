@@ -52,9 +52,45 @@ const MILITARY_HAPPINESS_PENALTY = 3;     // happiness penalty at militaryLevel 
 // Manufacturing import cost: paid per turn when Manufacturing level exceeds Mining level
 const MANUFACTURING_IMPORT_COST_PER_LEVEL = 0.3; // $M/turn per level gap
 
-// Trade routes — maturity-based income (placeholder until goods/resources system in Phase 3.5)
-const TRADE_ROUTE_MATURITY_TURNS  = 50;   // turns for a route to reach full income
-const TRADE_ROUTE_INCOME_MAX      = 15;   // $M/turn per route at full maturity
+// Trade routes
+const TRADE_ROUTE_MATURITY_TURNS       = 50;    // turns for route to reach full maturity
+
+// Trade volume & income
+// Max export volume per category = round(TRADE_VOLUME_BASE × nationDemand[cat])
+// Income = volume × TRADE_EXPORT_INCOME_PER_UNIT × exportQuality × maturityMult
+const TRADE_VOLUME_BASE                = 10;    // base max units (before demand/supply multiplier)
+const TRADE_EXPORT_INCOME_PER_UNIT     = 0.6;   // $M/turn per unit at quality 1.0, full maturity
+
+// Trade negotiation — nation offer quality
+// exportQuality = clamp(BASE + (leverage/3)×LEVERAGE + pushCount×PUSH + threaten?THREATEN:0, MIN, MAX)
+const TRADE_OFFER_QUALITY_BASE         = 0.4;
+const TRADE_OFFER_QUALITY_LEVERAGE     = 0.4;   // max bonus from leverage (at leverage=3)
+const TRADE_OFFER_QUALITY_PUSH         = 0.08;  // bonus per push round
+const TRADE_OFFER_QUALITY_THREATEN     = 0.08;  // extra bonus when threatening
+const TRADE_OFFER_QUALITY_MIN          = 0.25;
+const TRADE_OFFER_QUALITY_MAX          = 1.2;
+
+// Trade negotiation — import price (what nation wants back; stored, used in Phase 3.5)
+const TRADE_IMPORT_PRICE_BASE          = 0.6;   // base multiplier
+const TRADE_IMPORT_PRICE_PUSH          = 0.08;  // increases per push
+const TRADE_IMPORT_PRICE_MAX           = 1.2;
+
+// Trade negotiation — push costs (immediate relations penalty)
+const TRADE_PUSH_RELATIONS_BASE        = 3;     // base -relations per push
+const TRADE_PUSH_RELATIONS_SCALE       = 1;     // extra per push count
+const TRADE_PUSH_THREATEN_RELATIONS    = 3;     // extra -relations when threatening
+const TRADE_PUSH_THREATEN_REL_SCALE    = 1;     // extra per push count when threatening
+
+// Trade negotiation — collapse risk (resolved at end of turn)
+// risk = max(0, pushCount×PER_PUSH − leverage×LEVERAGE_REDUCE + threaten?ADD:0)
+const TRADE_COLLAPSE_RISK_PER_PUSH     = 0.12;  // 12% per push
+const TRADE_COLLAPSE_LEVERAGE_REDUCE   = 0.08;  // -8% per leverage point
+const TRADE_COLLAPSE_THREATEN_ADD      = 0.05;  // +5% when threatening
+
+// Trade negotiation — straight-accept probability (best outcome, requires pushCount >= 1)
+const TRADE_STRAIGHT_ACCEPT_BASE       = 0.05;  // 5% base chance
+const TRADE_STRAIGHT_ACCEPT_LEVERAGE   = 0.15;  // +15% per leverage point above 1.0
+const TRADE_STRAIGHT_ACCEPT_RELATIONS  = 0.005; // +0.5% per relations point above 50
 
 // Population
 const POPULATION_START            = 10;     // starting population (millions)
@@ -74,3 +110,28 @@ const MILITARY_MANPOWER_RATIO     = 25;     // soft military strength cap per mi
 // AI Nations — per-turn tick behaviour (same for all nations in Phase 3.1)
 const NATION_MILITARY_DRIFT_RATE  = 0.05;   // fraction of gap closed per turn toward starting militaryLevel
 const NATION_RELATIONS_DRIFT_RATE = 0.2;    // points/turn relations drifts back toward 50 (neutral)
+
+// Resource Deposits — Phase 3.5
+// Prospecting policy builds G.prospectingLevel (0–100); level drives per-turn discovery chance.
+const PROSPECT_BASE_CHANCE        = 0.01;   // 1% base chance per turn
+const PROSPECT_LEVEL_SCALE        = 0.0015; // +0.15% per prospecting level (at 10 → ~2.5%)
+const PROSPECT_DIMINISH_RATE      = 0.15;   // each deposit reduces chance by 15% multiplicatively
+
+// Deposit development: each deposit starts as an anomaly and is developed in funded stages.
+// Tier order: occurrence → vein → deposit → reserve → majorReserve
+// Statuses: anomaly → surveying → commissioning → producing (or upgrading → commissioning)
+const DEPOSIT_SURVEY_COST         = 50;    // $M total cost to complete an initial survey
+
+// Commissioning cost per tier ($M) — paid after survey/successful upgrade, guaranteed
+const DEPOSIT_COMMISSION_COST     = { occurrence: 50, vein: 100, deposit: 200, reserve: 400, majorReserve: 800 };
+
+// Upgrade attempt cost per tier transition ($M, 25% success chance):
+const DEPOSIT_TIER_UPGRADE_COST   = { occurrence: 100, vein: 200, deposit: 400, reserve: 800 };
+
+// Mt/yr produced by each tier when in 'producing' status:
+const DEPOSIT_TIER_OUTPUT         = { occurrence: 1, vein: 5, deposit: 15, reserve: 40, majorReserve: 100 };
+
+const DEPOSIT_UPGRADE_SUCCESS     = 0.25;  // 25% success chance when upgrade progress hits 100%
+const DEPOSIT_PROGRESS_DECAY      = 2.0;   // % per turn, for in-progress (unfunded) deposits
+// Max-tier distribution weights for newly detected anomalies:
+const DEPOSIT_MAX_TIER_WEIGHTS    = [35, 30, 20, 10, 5]; // occurrence / vein / deposit / reserve / majorReserve

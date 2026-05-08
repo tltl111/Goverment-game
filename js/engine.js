@@ -12,6 +12,8 @@ function getTechEffects() {
     techCostMult:          1.0,
     infraDecayMult:        1.0,
     infraGrowthMult:       1.0,
+    industrialGrowthMult:  1.0,   // applies to mining + manufacturing growth rate
+    industrialDecayMult:   1.0,   // applies to mining + manufacturing decay rate
   };
   for (const id of G.unlockedTechs) {
     const fx = TECHNOLOGIES[id].effects;
@@ -22,6 +24,8 @@ function getTechEffects() {
     if (fx.techCostMult)          e.techCostMult          *= fx.techCostMult;
     if (fx.infraDecayMult)        e.infraDecayMult        *= fx.infraDecayMult;
     if (fx.infraGrowthMult)       e.infraGrowthMult       *= fx.infraGrowthMult;
+    if (fx.industrialGrowthMult)  e.industrialGrowthMult  *= fx.industrialGrowthMult;
+    if (fx.industrialDecayMult)   e.industrialDecayMult   *= fx.industrialDecayMult;
     if (fx.policyCostMult) {
       for (const [k, v] of Object.entries(fx.policyCostMult)) {
         e.policyCostMult[k] = (e.policyCostMult[k] || 1) * v;
@@ -232,9 +236,89 @@ function getRpPerTurn() {
   return (base + eduBonus + techBonus) * pe.researchSpeedMult;
 }
 
-// Income for a single route: ramps linearly from $0 to TRADE_ROUTE_INCOME_MAX over TRADE_ROUTE_MATURITY_TURNS.
+// Leverage of the player over a nation during negotiation.
+// leverage = clamp(militaryLevel / nationMilitaryLevel × relations/50, 0.1, 3.0)
+// A nation with no military (level 0) is treated as level 1 to avoid division by zero.
+function getTradeNegotiationLeverage(nationId) {
+  const ns  = G.nations[nationId];
+  const def = NATIONS[nationId];
+  const milRatio = G.militaryLevel / Math.max(1, def.militaryLevel);
+  const relFactor = ns.relations / 50;
+  return Math.max(0.1, Math.min(3.0, milRatio * relFactor));
+}
+
+// Deal quality for a given negotiation round and nation.
+// Higher leverage and more rounds → better deal.
+function getTradeNegotiationDealQuality(nationId, round) {
+  const leverage = getTradeNegotiationLeverage(nationId);
+  const q = TRADE_OFFER_QUALITY_BASE
+    + (leverage / 3) * TRADE_OFFER_QUALITY_LEVERAGE
+    + (round - 1)   * TRADE_OFFER_QUALITY_PUSH;
+  return Math.max(TRADE_OFFER_QUALITY_MIN, Math.min(TRADE_OFFER_QUALITY_MAX, q));
+}
+
+// Max volume a nation can absorb (export from player) or produce (import to player) for a category.
+function getTradeMaxVolume(nationId, cat, leg) {
+  const trade = NATIONS[nationId].trade;
+  const mult  = leg === 'export' ? (trade.demand[cat] || 1) : (trade.supply[cat] || 1);
+  return Math.max(1, Math.round(TRADE_VOLUME_BASE * mult));
+}
+
+// Nation's counter offer for a given push state.
+// exportQuality: what they pay per unit of player's exports.
+// importQuality: what they expect per unit of their exports (stored, Phase 3.5).
+function getNationCounterOffer(nationId, pushCount, threatened) {
+  const leverage = getTradeNegotiationLeverage(nationId);
+  const exportQuality = Math.max(TRADE_OFFER_QUALITY_MIN, Math.min(TRADE_OFFER_QUALITY_MAX,
+    TRADE_OFFER_QUALITY_BASE
+    + (leverage / 3) * TRADE_OFFER_QUALITY_LEVERAGE
+    + pushCount * TRADE_OFFER_QUALITY_PUSH
+    + (threatened ? TRADE_OFFER_QUALITY_THREATEN : 0)
+  ));
+  const importQuality = Math.min(TRADE_IMPORT_PRICE_MAX,
+    TRADE_IMPORT_PRICE_BASE + pushCount * TRADE_IMPORT_PRICE_PUSH
+  );
+  return { exportQuality, importQuality };
+}
+
+// Collapse risk if the player has pushed pushCount times (including this push).
+function getPushCollapseRisk(nationId, pushCount, threatened) {
+  const leverage = getTradeNegotiationLeverage(nationId);
+  return Math.max(0, Math.min(0.95,
+    pushCount * TRADE_COLLAPSE_RISK_PER_PUSH
+    - leverage * TRADE_COLLAPSE_LEVERAGE_REDUCE
+    + (threatened ? TRADE_COLLAPSE_THREATEN_ADD : 0)
+  ));
+}
+
+// Relations cost applied immediately when the player pushes.
+function getPushRelationsCost(pushCount, threatened) {
+  const base  = TRADE_PUSH_RELATIONS_BASE  + pushCount * TRADE_PUSH_RELATIONS_SCALE;
+  const extra = threatened ? TRADE_PUSH_THREATEN_RELATIONS + pushCount * TRADE_PUSH_THREATEN_REL_SCALE : 0;
+  return base + extra;
+}
+
+// Probability the nation straight-up accepts on the next response (requires pushCount >= 1).
+function getStraightAcceptChance(nationId, pushCount) {
+  if (pushCount < 1) return 0;
+  const leverage = getTradeNegotiationLeverage(nationId);
+  const ns = G.nations[nationId];
+  return Math.max(0, Math.min(0.7,
+    TRADE_STRAIGHT_ACCEPT_BASE
+    + Math.max(0, leverage - 1.0) * TRADE_STRAIGHT_ACCEPT_LEVERAGE
+    + Math.max(0, ns.relations - 50) * TRADE_STRAIGHT_ACCEPT_RELATIONS
+  ));
+}
+
+// Income for a single trade route.
+// Only exportItems generate income; importItems are placeholder until Phase 3.5.
 function getTradeRouteIncome(route) {
-  return TRADE_ROUTE_INCOME_MAX * Math.min(1, route.maturity / TRADE_ROUTE_MATURITY_TURNS);
+  if (!route.nationId || !NATIONS[route.nationId]) return 0;
+  const maturityMult = Math.min(1, route.maturity / TRADE_ROUTE_MATURITY_TURNS);
+  const eq = route.exportQuality || 0;
+  return (route.exportItems || []).reduce((sum, { cat, volume }) => {
+    return sum + (volume || 0) * TRADE_EXPORT_INCOME_PER_UNIT * eq * maturityMult;
+  }, 0);
 }
 
 // Total trade income across all active routes, multiplied by Seaport Expansion bonus if complete.
@@ -247,6 +331,102 @@ function getTotalTradeIncome() {
 function getMilitaryStrength() {
   const raw = MILITARY_STRENGTH_MAX * (G.militaryLevel / 100);
   return Math.min(raw, G.population * MILITARY_MANPOWER_RATIO);
+}
+
+// Resource Deposits (Phase 3.5) ============================================================
+
+// Deposit capacity per province based on its size.
+const REGION_CAPACITY_BY_SIZE = { small: 1, medium: 2, large: 3, capital: 4 };
+
+// Returns the max number of deposit slots for a province.
+function getRegionCapacity(provinceId) {
+  const prov = MAP_REGIONS.player.provinces[provinceId];
+  if (!prov) return 0;
+  return REGION_CAPACITY_BY_SIZE[prov.size] || 2;
+}
+
+// Returns number of currently active deposits (all statuses) in a province.
+function getRegionActiveDepositCount(provinceId) {
+  return G.deposits.filter(d => d.regionId === provinceId).length;
+}
+
+// Returns list of province IDs that still have at least one free deposit slot.
+function getFreeSlotProvinces() {
+  return Object.keys(MAP_REGIONS.player.provinces).filter(id =>
+    getRegionActiveDepositCount(id) < getRegionCapacity(id)
+  );
+}
+
+// Regional congestion multiplier: +20% development cost per other deposit in the same region.
+function getRegionCongestionMultiplier(dep) {
+  if (!dep.regionId) return 1;
+  const others = G.deposits.filter(d => d.regionId === dep.regionId && d.id !== dep.id).length;
+  return 1 + 0.20 * others;
+}
+
+// Returns IDs of all resource types currently discoverable:
+// requiresTech === null = always available; otherwise needs that resource ID in G.unlockedResources.
+function getAvailableResourceTypes() {
+  return Object.keys(RESOURCE_TYPES).filter(id => {
+    const req = RESOURCE_TYPES[id].requiresTech;
+    return req === null || G.unlockedResources.includes(id);
+  });
+}
+
+// Per-turn discovery chance. Returns 0 if all province slots are full.
+// Otherwise scales with prospectingLevel; diminishes with total active deposits.
+function getProspectChance() {
+  if (getFreeSlotProvinces().length === 0) return 0;
+  const levelBonus = G.prospectingLevel * PROSPECT_LEVEL_SCALE;
+  const diminish   = 1 / (1 + G.deposits.length * PROSPECT_DIMINISH_RATE);
+  return (PROSPECT_BASE_CHANCE + levelBonus) * diminish;
+}
+
+// Total cost ($M) for the current development phase of a deposit, including regional congestion.
+function getDepositDevelopCost(dep) {
+  const congestion = getRegionCongestionMultiplier(dep);
+  let base = 0;
+  if (dep.status === 'anomaly' || dep.status === 'surveying') base = DEPOSIT_SURVEY_COST;
+  else if (dep.status === 'commissioning') base = DEPOSIT_COMMISSION_COST[dep.currentTier] || 0;
+  else if (dep.status === 'upgrading') base = DEPOSIT_TIER_UPGRADE_COST[dep.currentTier] || 0;
+  return Math.round(base * congestion);
+}
+
+// Whether the player has the tech to attempt an upgrade from a deposit's current tier.
+function canUpgradeDeposit(dep) {
+  if (dep.status !== 'producing') return false;
+  if (dep.currentTier === 'majorReserve') return false;
+  const techNeeded = {
+    occurrence: 'prospectingMethods',
+    vein:       'industrialMining',
+    deposit:    'openPitMining',
+    reserve:    'deepVeinExtraction',
+  };
+  const needed = techNeeded[dep.currentTier];
+  return needed ? G.unlockedTechs.includes(needed) : false;
+}
+
+// Mt/yr produced by a deposit (0 if not currently in 'producing' status).
+function getDepositOutput(dep) {
+  if (dep.status !== 'producing' || !dep.currentTier) return 0;
+  return DEPOSIT_TIER_OUTPUT[dep.currentTier] || 0;
+}
+
+// Sum of Mt/yr per resource type: active producing deposits + established industry pool.
+function getResourceProduction() {
+  const prod = {};
+  for (const dep of G.deposits) {
+    const units = getDepositOutput(dep);
+    if (units > 0 && dep.resourceType) {
+      prod[dep.resourceType] = (prod[dep.resourceType] || 0) + units;
+    }
+  }
+  for (const [resType, industry] of Object.entries(G.establishedIndustries || {})) {
+    if (industry.totalOutput > 0) {
+      prod[resType] = (prod[resType] || 0) + industry.totalOutput;
+    }
+  }
+  return prod;
 }
 
 // Population capacity: territory × base × infrastructure multiplier × project/tech multipliers.

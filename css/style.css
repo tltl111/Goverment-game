@@ -422,6 +422,318 @@ section {
   border-color: var(--border-light);
 }
 
+.policy-card.policy-locked {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.policy-locked-notice {
+  font-size: 11px;
+  color: var(--yellow);
+  margin-top: 4px;
+}
+
+/* ============================================================
+   RESOURCES TAB (Phase 3.5)
+   ============================================================ */
+
+.resources-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+}
+
+.res-section {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.res-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+
+.res-prospect-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.res-stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.res-stat-label { color: var(--text-2); }
+.res-stat-value { color: var(--text-1); font-weight: 600; }
+
+.res-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.res-hint strong { color: var(--blue); }
+
+/* Leads */
+.res-leads-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.res-lead-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 7px 10px;
+}
+
+.res-lead-icon { font-size: 18px; }
+
+.res-lead-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.res-lead-name { font-size: 12px; font-weight: 700; color: var(--text-1); }
+.res-lead-size { font-size: 11px; color: var(--text-3); text-transform: capitalize; }
+
+.res-lead-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.res-btn {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.res-btn-confirm {
+  background: var(--blue-dim);
+  color: var(--text-1);
+  border-color: var(--blue);
+}
+
+.res-btn-confirm:hover:not(.disabled) { background: var(--blue); }
+.res-btn-confirm.disabled { opacity: 0.45; cursor: not-allowed; }
+
+.res-btn-dismiss {
+  background: transparent;
+  color: var(--text-3);
+  border-color: var(--border);
+}
+
+.res-btn-dismiss:hover { color: var(--text-1); border-color: var(--border-light); }
+
+/* Deposit cards (Phase 3.5 redesign) */
+.res-deposits-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.res-deposit-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  font-size: 12px;
+}
+
+.res-deposit-card.res-deposit-anomaly  { border-color: rgba(150,150,200,0.4); background: rgba(80,80,120,0.15); }
+.res-deposit-card.res-deposit-inprogress { border-color: var(--blue); background: var(--blue-dim); }
+.res-deposit-card.res-deposit-active   { border-color: var(--green); background: rgba(0,200,80,0.06); }
+.res-deposit-card.res-deposit-producing { border-color: rgba(0,180,60,0.3); }
+
+.res-deposit-card-icon { font-size: 16px; flex-shrink: 0; }
+
+.res-deposit-card-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.res-deposit-card-name { font-weight: 700; color: var(--text-1); }
+.res-deposit-card-sub  { font-size: 11px; color: var(--text-3); }
+
+.res-deposit-card-actions {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+/* Tier badges */
+.res-deposit-tier {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: capitalize;
+}
+.res-deposit-tier-occurrence   { background: var(--bg-3); color: var(--text-3); }
+.res-deposit-tier-vein         { background: var(--blue-dim); color: var(--blue); }
+.res-deposit-tier-deposit      { background: rgba(0,180,60,0.15); color: var(--green); }
+.res-deposit-tier-reserve      { background: rgba(255,200,50,0.15); color: var(--yellow); }
+.res-deposit-tier-majorReserve { background: rgba(255,90,30,0.15); color: #ff7a40; }
+
+/* Locked upgrade icon */
+.res-btn-locked {
+  font-size: 10px;
+  color: var(--text-3);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Partial progress indicator */
+.res-partial { color: var(--yellow); font-weight: 700; }
+
+/* Development progress bar */
+.res-progress-bar-wrap {
+  height: 5px;
+  background: var(--bg-3);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 6px 0 2px;
+}
+.res-progress-bar {
+  height: 100%;
+  background: var(--blue);
+  border-radius: 3px;
+  transition: width 0.2s;
+}
+.res-progress-desc { font-size: 10px; color: var(--text-3); }
+
+/* Development control row */
+.res-dev-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 3px 0;
+}
+.res-dev-slider-row input[type="range"] { flex: 1; }
+
+/* Legacy: prod-list still used */
+.res-prod-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.res-prod-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  padding: 3px 0;
+}
+
+.res-prod-rate {
+  font-size: 11px;
+  color: var(--green);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.res-empty {
+  font-size: 12px;
+  color: var(--text-3);
+  text-align: center;
+  padding: 16px 0;
+  margin: 0;
+}
+
+/* Province slot pips */
+.res-province-slots {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  flex: 1;
+  padding: 0 6px;
+}
+.res-slot-pip {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.res-slot-pip.used {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+.res-slots-full { color: var(--yellow) !important; font-weight: 700; }
+
+/* Province / congestion inline tags on deposit cards */
+.res-region-tag {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: var(--bg-3);
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 3px;
+}
+.res-congestion-tag {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--yellow);
+}
+
+
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.res-industry-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(0,180,60,0.06);
+  border: 1px solid rgba(0,180,60,0.2);
+}
+
+.res-industry-icon { font-size: 14px; flex-shrink: 0; }
+.res-industry-name { flex: 1; color: var(--text-1); font-weight: 600; }
+.res-industry-sites { font-size: 10px; color: var(--text-3); white-space: nowrap; }
+.res-industry-output {
+  font-size: 11px;
+  color: var(--green);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+
 .policy-header {
   display: flex;
   align-items: center;
@@ -1101,6 +1413,133 @@ section {
   border-color: var(--red);
 }
 
+/* ---- Trade Routes Tab — Phase 3.3 ---- */
+.tr-hint {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-3);
+  background: var(--bg-3);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+.tr-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-3);
+  text-align: center;
+}
+.tr-route-cats {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.btn-tr-renegotiate {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-2);
+  font-size: 10px;
+  padding: 2px 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-tr-renegotiate:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+/* ============================================================
+   NEGOTIATION PANEL — shared across trade tab and map panel
+   ============================================================ */
+.neg-panel {
+  background: var(--bg-3);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.neg-header { display: flex; justify-content: space-between; align-items: center; }
+.neg-title { font-size: 12px; font-weight: 700; color: var(--text-1); }
+.neg-badge { font-size: 10px; padding: 2px 6px; border-radius: 10px; background: var(--bg-4); color: var(--text-3); }
+.neg-badge-wait { background: rgba(210,153,34,0.15); color: var(--yellow); }
+.neg-badge-counter { background: rgba(56,139,253,0.15); color: var(--blue); }
+.neg-meta { font-size: 11px; color: var(--text-3); }
+.neg-section-label { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.neg-vol-row { display: flex; align-items: center; gap: 5px; }
+.neg-vol-label { font-size: 10px; color: var(--text-2); min-width: 84px; }
+.neg-vol-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  height: 3px;
+  background: var(--bg-4);
+  border-radius: 2px;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+.neg-vol-input {
+  width: 38px;
+  background: var(--bg-4);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-1);
+  font-size: 11px;
+  padding: 1px 4px;
+  text-align: center;
+}
+.neg-vol-max { font-size: 10px; color: var(--text-3); white-space: nowrap; }
+.neg-income-hint { font-size: 10px; color: var(--green); }
+.neg-waiting { font-size: 11px; color: var(--text-3); padding: 6px 0; }
+.neg-offer-box {
+  background: var(--bg-2);
+  border-radius: 4px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.neg-offer-row { display: flex; justify-content: space-between; font-size: 11px; }
+.neg-offer-row span:first-child { color: var(--text-3); }
+.neg-offer-row span:last-child { font-weight: 600; color: var(--text-1); }
+.neg-push-section { display: flex; flex-direction: column; gap: 5px; }
+.neg-threat-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.neg-threat-toggle input { accent-color: var(--yellow); cursor: pointer; }
+.neg-threat-hint { font-size: 10px; color: var(--text-3); }
+.neg-push-costs { display: flex; gap: 10px; font-size: 10px; color: var(--text-3); flex-wrap: wrap; }
+.neg-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+
+/* ---- Map Trade Active Route / None ---- */
+.map-trade-active {
+  margin-top: 8px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.map-trade-status { font-size: 12px; font-weight: 700; color: var(--green); }
+.map-trade-detail { font-size: 11px; color: var(--text-3); }
+.map-trade-none { margin-top: 8px; }
+
+/* Generic shared button helpers */
+.btn { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; border: 1px solid var(--border); background: var(--bg-4); color: var(--text-1); transition: background 0.15s, border-color 0.15s; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:not(:disabled):hover { background: var(--bg-3); border-color: var(--border-light); }
+.btn-green { background: #1a3a2a; border-color: var(--green); color: var(--green); }
+.btn-green:not(:disabled):hover { background: #1f4a35; }
+.btn-muted { background: none; border-color: transparent; color: var(--text-3); }
+.btn-muted:not(:disabled):hover { color: var(--red); border-color: var(--red); }
+.btn-sm { font-size: 10px; padding: 3px 7px; }
+
 #research-panel {
   overflow: hidden;
 }
@@ -1605,13 +2044,22 @@ section {
 /* ====== WORLD MAP ====== */
 .world-map-container {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
   padding: 8px;
 }
 
+.world-map-svg-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
 .world-map-svg {
+  user-select: none;
   width: 100%;
   aspect-ratio: 800 / 560;
+  max-height: calc(100vh - 140px);
   display: block;
   cursor: grab;
   user-select: none;
@@ -1679,10 +2127,13 @@ section {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px 12px;
-  margin-top: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 240px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  max-height: calc(100vh - 140px);
 }
 .map-info-nation {
   display: flex;
