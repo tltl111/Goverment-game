@@ -4,28 +4,38 @@
 
 function getTechEffects() {
   const e = {
-    gdpGrowthBonus:        0,
-    happinessBonus:        0,
-    rpResearchCentreBonus: 0,
-    allPolicyCostMult:     1.0,
-    policyCostMult:        {},
-    techCostMult:          1.0,
-    infraDecayMult:        1.0,
-    infraGrowthMult:       1.0,
-    industrialGrowthMult:  1.0,   // applies to mining + manufacturing growth rate
-    industrialDecayMult:   1.0,   // applies to mining + manufacturing decay rate
+    gdpGrowthBonus:                0,
+    happinessBonus:                0,
+    rpResearchCentreBonus:         0,
+    allPolicyCostMult:             1.0,
+    policyCostMult:                {},
+    techCostMult:                  1.0,
+    infraDecayMult:                1.0,
+    infraGrowthMult:               1.0,
+    industrialGrowthMult:          1.0,   // applies to mining + manufacturing growth rate
+    industrialDecayMult:           1.0,   // applies to mining + manufacturing decay rate
+    tradeExportQualityBonus:       0,     // flat bonus to base export quality in negotiations
+    tradeImportPriceReduction:     0,     // flat reduction to base import asking price
+    culturalExchangeRelationsBonus: 0,    // bonus relations score per active trade route
+    cultureDiplomacyRelationsBonus: 0,    // flat relations bonus to all nations from Cultural Diplomacy tech
+    unRelationsBonus:               0,    // flat relations bonus to all nations from UN Membership tech
   };
   for (const id of G.unlockedTechs) {
     const fx = TECHNOLOGIES[id].effects;
-    if (fx.gdpGrowthBonus)        e.gdpGrowthBonus        += fx.gdpGrowthBonus;
-    if (fx.happinessBonus)        e.happinessBonus        += fx.happinessBonus;
-    if (fx.rpResearchCentreBonus) e.rpResearchCentreBonus += fx.rpResearchCentreBonus;
-    if (fx.allPolicyCostMult)     e.allPolicyCostMult     *= fx.allPolicyCostMult;
-    if (fx.techCostMult)          e.techCostMult          *= fx.techCostMult;
-    if (fx.infraDecayMult)        e.infraDecayMult        *= fx.infraDecayMult;
-    if (fx.infraGrowthMult)       e.infraGrowthMult       *= fx.infraGrowthMult;
-    if (fx.industrialGrowthMult)  e.industrialGrowthMult  *= fx.industrialGrowthMult;
-    if (fx.industrialDecayMult)   e.industrialDecayMult   *= fx.industrialDecayMult;
+    if (fx.gdpGrowthBonus)                e.gdpGrowthBonus                += fx.gdpGrowthBonus;
+    if (fx.happinessBonus)                e.happinessBonus                += fx.happinessBonus;
+    if (fx.rpResearchCentreBonus)         e.rpResearchCentreBonus         += fx.rpResearchCentreBonus;
+    if (fx.allPolicyCostMult)             e.allPolicyCostMult             *= fx.allPolicyCostMult;
+    if (fx.techCostMult)                  e.techCostMult                  *= fx.techCostMult;
+    if (fx.infraDecayMult)                e.infraDecayMult                *= fx.infraDecayMult;
+    if (fx.infraGrowthMult)               e.infraGrowthMult               *= fx.infraGrowthMult;
+    if (fx.industrialGrowthMult)          e.industrialGrowthMult          *= fx.industrialGrowthMult;
+    if (fx.industrialDecayMult)           e.industrialDecayMult           *= fx.industrialDecayMult;
+    if (fx.tradeExportQualityBonus)       e.tradeExportQualityBonus       += fx.tradeExportQualityBonus;
+    if (fx.tradeImportPriceReduction)     e.tradeImportPriceReduction     += fx.tradeImportPriceReduction;
+    if (fx.culturalExchangeRelationsBonus) e.culturalExchangeRelationsBonus += fx.culturalExchangeRelationsBonus;
+    if (fx.cultureDiplomacyRelationsBonus) e.cultureDiplomacyRelationsBonus += fx.cultureDiplomacyRelationsBonus;
+    if (fx.unRelationsBonus)               e.unRelationsBonus               += fx.unRelationsBonus;
     if (fx.policyCostMult) {
       for (const [k, v] of Object.entries(fx.policyCostMult)) {
         e.policyCostMult[k] = (e.policyCostMult[k] || 1) * v;
@@ -243,7 +253,7 @@ function getTradeNegotiationLeverage(nationId) {
   const ns  = G.nations[nationId];
   const def = NATIONS[nationId];
   const milRatio = G.militaryLevel / Math.max(1, def.militaryLevel);
-  const relFactor = ns.relations / 50;
+  const relFactor = (ns.relations + 100) / 100;
   return Math.max(0.1, Math.min(3.0, milRatio * relFactor));
 }
 
@@ -257,27 +267,33 @@ function getTradeNegotiationDealQuality(nationId, round) {
   return Math.max(TRADE_OFFER_QUALITY_MIN, Math.min(TRADE_OFFER_QUALITY_MAX, q));
 }
 
-// Max volume a nation can absorb (export from player) or produce (import to player) for a category.
-function getTradeMaxVolume(nationId, cat, leg) {
-  const trade = NATIONS[nationId].trade;
-  const mult  = leg === 'export' ? (trade.demand[cat] || 1) : (trade.supply[cat] || 1);
+// Max export volume (Mt) the player can offer for a given resource to a given nation.
+function getTradeMaxExportVolume(nationId, resourceId) {
+  const mult = (NATIONS[nationId].trade.demandByResource || {})[resourceId] || 0;
+  return Math.max(1, Math.round(TRADE_VOLUME_BASE * mult));
+}
+
+// Max import volume (Mt) a nation can supply for a given resource.
+function getTradeMaxImportVolume(nationId, resourceId) {
+  const mult = (NATIONS[nationId].trade.supplyByResource || {})[resourceId] || 0;
   return Math.max(1, Math.round(TRADE_VOLUME_BASE * mult));
 }
 
 // Nation's counter offer for a given push state.
-// exportQuality: what they pay per unit of player's exports.
-// importQuality: what they expect per unit of their exports (stored, Phase 3.5).
+// exportQuality: what they pay per unit of player's exports (higher = more income for player).
+// importQuality: their asking price per unit supplied (lower = more savings for player).
 function getNationCounterOffer(nationId, pushCount, threatened) {
   const leverage = getTradeNegotiationLeverage(nationId);
+  const te = getTechEffects();
   const exportQuality = Math.max(TRADE_OFFER_QUALITY_MIN, Math.min(TRADE_OFFER_QUALITY_MAX,
-    TRADE_OFFER_QUALITY_BASE
+    TRADE_OFFER_QUALITY_BASE + te.tradeExportQualityBonus
     + (leverage / 3) * TRADE_OFFER_QUALITY_LEVERAGE
     + pushCount * TRADE_OFFER_QUALITY_PUSH
     + (threatened ? TRADE_OFFER_QUALITY_THREATEN : 0)
   ));
-  const importQuality = Math.min(TRADE_IMPORT_PRICE_MAX,
-    TRADE_IMPORT_PRICE_BASE + pushCount * TRADE_IMPORT_PRICE_PUSH
-  );
+  const importQuality = Math.min(TRADE_IMPORT_PRICE_MAX, Math.max(0.1,
+    TRADE_IMPORT_PRICE_BASE - te.tradeImportPriceReduction + pushCount * TRADE_IMPORT_PRICE_PUSH
+  ));
   return { exportQuality, importQuality };
 }
 
@@ -306,25 +322,131 @@ function getStraightAcceptChance(nationId, pushCount) {
   return Math.max(0, Math.min(0.7,
     TRADE_STRAIGHT_ACCEPT_BASE
     + Math.max(0, leverage - 1.0) * TRADE_STRAIGHT_ACCEPT_LEVERAGE
-    + Math.max(0, ns.relations - 50) * TRADE_STRAIGHT_ACCEPT_RELATIONS
+    + Math.max(0, ns.relations) * TRADE_STRAIGHT_ACCEPT_RELATIONS
   ));
 }
 
-// Income for a single trade route.
-// Only exportItems generate income; importItems are placeholder until Phase 3.5.
-function getTradeRouteIncome(route) {
+// Total resource output (Mt/yr) across all established industry pools.
+function getPlayerResourceOutput() {
+  const out = {};
+  for (const [rid, data] of Object.entries(G.establishedIndustries || {})) {
+    out[rid] = data.totalOutput || 0;
+  }
+  return out;
+}
+
+// Export income from a route: player's resource surplus × nation demand × quality × maturity.
+function getTradeRouteExportIncome(route) {
   if (!route.nationId || !NATIONS[route.nationId]) return 0;
   const maturityMult = Math.min(1, route.maturity / TRADE_ROUTE_MATURITY_TURNS);
   const eq = route.exportQuality || 0;
-  return (route.exportItems || []).reduce((sum, { cat, volume }) => {
-    return sum + (volume || 0) * TRADE_EXPORT_INCOME_PER_UNIT * eq * maturityMult;
-  }, 0);
+  const playerOutput = getPlayerResourceOutput();
+  const demands = NATIONS[route.nationId].trade.demandByResource || {};
+  let income = 0;
+  for (const [rid, demandMult] of Object.entries(demands)) {
+    const maxDemandVol = Math.max(1, Math.round(TRADE_VOLUME_BASE * demandMult));
+    const available   = playerOutput[rid] || 0;
+    const exportVol   = Math.min(available, maxDemandVol);
+    if (exportVol > 0) {
+      income += exportVol * (RESOURCE_EXPORT_PRICE[rid] || 0) * eq * maturityMult;
+    }
+  }
+  return income;
+}
+
+// Import saving from a route: nation supplies resources the player lacks, reducing effective import cost.
+// saving = shortfall × price × RESOURCE_IMPORT_SAVING_FRAC × (1 − importQuality) × maturity
+// Lower importQuality = cheaper rate negotiated = more savings.
+function getTradeRouteImportSaving(route) {
+  if (!route.nationId || !NATIONS[route.nationId]) return 0;
+  const maturityMult = Math.min(1, route.maturity / TRADE_ROUTE_MATURITY_TURNS);
+  const iq = route.importQuality || 0;
+  const savingMult = Math.max(0, 1 - iq);
+  if (savingMult <= 0) return 0;
+  const playerOutput = getPlayerResourceOutput();
+  const supplies = NATIONS[route.nationId].trade.supplyByResource || {};
+  let saving = 0;
+  for (const [rid, supplyMult] of Object.entries(supplies)) {
+    const maxSupplyVol = Math.max(1, Math.round(TRADE_VOLUME_BASE * supplyMult));
+    const playerHas   = playerOutput[rid] || 0;
+    const shortfall   = Math.max(0, maxSupplyVol - playerHas);
+    if (shortfall > 0) {
+      saving += shortfall * (RESOURCE_EXPORT_PRICE[rid] || 0) * RESOURCE_IMPORT_SAVING_FRAC * savingMult * maturityMult;
+    }
+  }
+  return saving;
+}
+
+// Combined export income + import savings for a route.
+function getTradeRouteIncome(route) {
+  return getTradeRouteExportIncome(route) + getTradeRouteImportSaving(route);
 }
 
 // Total trade income across all active routes, multiplied by Seaport Expansion bonus if complete.
 function getTotalTradeIncome() {
   const pe = getProjectEffects();
   return G.tradeRoutes.reduce((sum, r) => sum + getTradeRouteIncome(r), 0) * pe.tradeIncomeMult;
+}
+
+// Compute the relations score (-100 to +100) for a nation from all contributing factors.
+// Called at end of each turn after per-turn history is updated.
+function computeNationRelations(nationId) {
+  const ns    = G.nations[nationId];
+  const def   = NATIONS[nationId];
+  const route = G.tradeRoutes.find(r => r.nationId === nationId);
+  let score   = 0;
+
+  // 1. Active trade route presence: +8
+  if (route) score += 8;
+
+  // 2. Route maturity bonus: up to +20 (route.maturity normalised against TRADE_ROUTE_MATURITY_TURNS)
+  if (route) score += Math.round(Math.min(1, route.maturity / TRADE_ROUTE_MATURITY_TURNS) * 20);
+
+  // 3. Import reliance: +4 per resource the nation demands that the player actually produces (max +16)
+  const output = getPlayerResourceOutput();
+  const demand = def.trade.demandByResource || {};
+  const relianceCount = Object.keys(demand).filter(rid => (output[rid] || 0) > 0).length;
+  score += Math.min(relianceCount * 4, 16);
+
+  // 4. Trade volume share: route income as fraction of nation GDP — up to +12
+  if (route) {
+    const income   = getTradeRouteIncome(route);
+    const gdpShare = income / Math.max(1, ns.gdp);
+    score += Math.min(12, Math.round(gdpShare * 500));
+  }
+
+  // 5. First contact bonus: +5, permanent once earned
+  if (ns.relationsFirstContact) score += 5;
+
+  // 6. Streak bonus: +2/turn of consecutive trade, capped at +14
+  score += Math.min(14, Math.floor(ns.relationsStreak) * 2);
+
+  // 7. Negotiation pressure penalty (stored as a negative value; recovers over time)
+  score += ns.relationsNegPenalty;
+
+  // 8. Broken route penalties: -15 each, recovering +3/turn until expired
+  for (const ev of ns.relationsBrokenRoutes) {
+    const turnsAgo = G.turn - ev.turn;
+    score += Math.min(0, -15 + turnsAgo * 3);
+  }
+
+  // 9. Cultural Exchange tech: flat bonus when active route exists
+  const ceTechFx = getTechEffects();
+  if (route && ceTechFx.culturalExchangeRelationsBonus > 0) score += ceTechFx.culturalExchangeRelationsBonus;
+
+  // 10. Active Alliance: flat per-turn relations bonus
+  const alliance = (G.diplomaticDeals || []).find(d => d.type === 'alliance' && d.nationId === nationId);
+  if (alliance) score += ALLIANCE_RELATIONS_BONUS;
+
+  // 11. Cultural Diplomacy tech: flat bonus to all nations
+  score += ceTechFx.cultureDiplomacyRelationsBonus;
+
+  // 12. UN Membership tech: global relations bonus
+  score += ceTechFx.unRelationsBonus;
+
+  const clamped = Math.max(-100, Math.min(100, Math.round(score)));
+  // Alliance floor: allied nations can never drop below Friendly tier
+  return alliance ? Math.max(ALLIANCE_RELATIONS_FLOOR, clamped) : clamped;
 }
 
 // Military strength: scales with accumulated militaryLevel, soft-capped by population manpower.

@@ -4,6 +4,81 @@ All notable changes to Government Simulator will be documented here.
 
 ---
 
+## [0.19.0] — Phase 4.4: Strategic Alliances, Cultural Diplomacy, UN Membership
+
+### Added
+- **`proposeAlliance(nationId)`** — proposes a permanent strategic alliance with a nation (requires Strategic Alliances tech and ≥40 relations). AI accepts if relations ≥ 50. Active alliances grant +3 relations/turn and prevent the relation score dropping below 20 (Friendly floor).
+- **`proposeNap(nationId)`** — proposes a Non-Aggression Pact lasting 20 turns (requires Diplomacy Corps, ≥0 relations). Shown in Diplomacy screen with turns remaining. Expires automatically with an event log entry. Will block war declarations when Phase 5 is implemented.
+- **`breakAlliance(nationId)`** — dissolves an active alliance, applying a −25 `relationsNegPenalty` to the nation.
+- **Cultural Diplomacy tech** (tier 5, trade path) — new tech unlocking a passive +12 base relations bonus with all nations globally.
+- **UN Membership tech** (tier 6, trade path) — new tech granting +5 relations with all nations globally and displaying a "🌐 UN Member" panel at the bottom of the Diplomacy screen.
+- **`G.diplomaticDeals`** — new state array tracking active NAP and Alliance deals: `[{ type, nationId, turnsLeft }]`. Alliances use `turnsLeft: null` (permanent); NAPs use a countdown.
+- **Diplomacy screen action buttons** — each nation card now shows context-appropriate action buttons: "Propose Alliance" (disabled if relations < 40), "Propose NAP" (disabled if relations < 0), "Break Alliance" (when allied).
+- **Deal status badges** — nation cards display active alliance ("🛡️ Allied") and NAP ("🕊️ NAP — N turns remaining") deal badges.
+- 8 new constants: `NAP_DURATION`, `ALLIANCE_MIN_PROPOSE_REL`, `NAP_MIN_PROPOSE_REL`, `ALLIANCE_ACCEPT_REL`, `NAP_ACCEPT_REL`, `ALLIANCE_BREAK_PENALTY`, `ALLIANCE_RELATIONS_FLOOR`, `ALLIANCE_RELATIONS_BONUS`.
+
+### Changed
+- **`computeNationRelations`** — extended with steps 10–12: alliance bonus (+3), Cultural Diplomacy tech bonus, UN Membership tech bonus. End of function now applies an alliance floor clamp (result ≥ 20 when allied).
+- **`getTechEffects`** — two new accumulated fields: `cultureDiplomacyRelationsBonus` and `unRelationsBonus`.
+- **`endTurn`** — new step 11 ticks NAP `turnsLeft` and removes expired deals.
+- **`strategicAlliances` tech** effectDesc updated to reflect NAP + Alliance actions are both unlocked.
+
+---
+
+## [0.18.0] — Phase 4.2–4.3: Diplomacy Corps + Diplomacy Screen
+
+### Added
+- **Trade & Diplomacy tech branch** — 5 new techs in a new path section of the tech tree:
+  - `tradeAgreements` (T3): +10% base export quality in all negotiations (requires Banking System + Market Regulation)
+  - `diplomacyCorps` (T4): unlocks Diplomacy screen tab
+  - `culturalExchange` (T5): +8 relations with every active trade partner
+  - `strategicAlliances` (T5): unlocks Alliance/NAP actions (Phase 4.4)
+  - `economicUnions` (T6): −15% import asking price in all negotiations
+- **Diplomacy screen tab** — visible but locked (🔒) until Diplomacy Corps is researched. Nation cards show relation score + tier badge, GDP, military level, trade streak, and active deals.
+- **`renderTabBar()`** — updates the Diplomacy tab button to locked/unlocked state; called on every `renderAll()`.
+- **Negotiation preview** now accounts for Trade Agreements and Economic Unions bonuses when estimating deal income.
+
+---
+
+## [0.17.0] — Phase 4.1: Relations Score
+
+### Added
+- **`computeNationRelations(nationId)`** — fully recomputed each turn from 9 weighted factors (active route, maturity, import reliance, trade volume share, first contact, streak, negotiation penalty, broken routes, Cultural Exchange tech bonus). Score range: −100 to +100.
+- **Five named tiers** — Allied (≥60), Friendly (≥20), Neutral (>−20), Tense (>−60), Hostile (≤−60) — via `getRelationsTier(score)` helper in render.js.
+- Tier badges shown on trade route cards, world map region shading, map info panel, statistics table, and (later) Diplomacy screen.
+- New nation state fields: `relationsNegPenalty`, `relationsFirstContact`, `relationsStreak`, `relationsBrokenRoutes`.
+- 2 new constants: `NATION_RELATIONS_NEG_PENALTY_RECOVERY`, `NATION_RELATIONS_BROKEN_ROUTE_TURNS`.
+
+### Changed
+- Relations leverage formula updated from `ns.relations / 50` to `(ns.relations + 100) / 100` for the −100…+100 scale.
+- `getStraightAcceptChance` reference point updated (0 = neutral on new scale).
+- All 6 relations-mutation call sites in actions.js updated to use `relationsNegPenalty`/`relationsBrokenRoutes` instead of direct `relations` assignment.
+
+---
+
+## [0.15.0] — Phase 3.6: Demand Profiles
+
+### Changed
+- **Trade route income** is now driven by actual resource types and deposit output instead of abstract volume categories
+  - Export income: player's established industry output × nation's per-resource demand multiplier × export quality × maturity
+  - Import savings: shortfall between player's output and nation's supply capacity × 30% of resource base price × import discount × maturity
+  - Accepting a deal with low `importQuality` (< 1.0) means higher import savings; pushing too hard reduces them
+- **Negotiation panel** replaced volume sliders with a live resource profile table showing what the nation buys/sells and how much the player can currently supply
+- **Route cards** show actual resource names and icons for active exports/imports, plus a breakdown of export income vs import savings
+- **Nation trade profiles** updated from abstract `demand`/`supply` categories to per-resource `demandByResource`/`supplyByResource` maps (iron, coal, timber, steel, oil, chemicals, copper, silicon, rareEarths)
+- `activeNegotiation` no longer carries `exportItems`/`importItems`; route objects no longer carry these arrays
+- `TRADE_EXPORT_INCOME_PER_UNIT` constant removed; replaced by `RESOURCE_EXPORT_PRICE` per-resource price table and `RESOURCE_IMPORT_SAVING_FRAC`
+
+### Added
+- `RESOURCE_EXPORT_PRICE` — base income ($M/Mt) per resource type
+- `RESOURCE_IMPORT_SAVING_FRAC` — fraction of base price saved per Mt of supply shortfall
+- `getPlayerResourceOutput()` — returns `{resourceId: Mt/yr}` from established industries
+- `getTradeRouteExportIncome(route)` — export leg income calculation
+- `getTradeRouteImportSaving(route)` — import savings calculation
+- `getTradeMaxExportVolume(nationId, resourceId)` and `getTradeMaxImportVolume(nationId, resourceId)`
+
+---
+
 ## [0.14.0] — Phase 3.5: Resource Deposits
 
 ### Added

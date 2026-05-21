@@ -10,6 +10,10 @@ function showPolicyTab(tab, btn) {
 }
 
 function showDashboardTab(tab, btn) {
+  if (tab === 'diplomacy' && !G.unlockedTechs.includes('diplomacyCorps')) {
+    showNotification('Requires Diplomacy Corps technology.', 'warn');
+    return;
+  }
   G.currentDashboardTab = tab;
   document.querySelectorAll('#dashboard-tabs .tab-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');

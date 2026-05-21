@@ -12,50 +12,77 @@ let _mapDocListenersAttached = false;
 // ============================================================
 // NEGOTIATION PANEL — shared helper, used in trade tab + map panel
 // ============================================================
+
+// Returns {label, cssClass} for a relations score in the range -100 to +100.
+function getRelationsTier(score) {
+  if (score >= 60)  return { label: 'Allied',   cssClass: 'rel-allied'   };
+  if (score >= 20)  return { label: 'Friendly',  cssClass: 'rel-friendly' };
+  if (score > -20)  return { label: 'Neutral',   cssClass: 'rel-neutral'  };
+  if (score > -60)  return { label: 'Tense',     cssClass: 'rel-tense'    };
+  return              { label: 'Hostile',   cssClass: 'rel-hostile'  };
+}
+
 function _buildNegotiationPanel(neg) {
   const def      = NATIONS[neg.nationId];
   const ns       = G.nations[neg.nationId];
   const leverage = getTradeNegotiationLeverage(neg.nationId);
   const leverStr = leverage >= 1.5 ? 'Strong' : leverage >= 0.8 ? 'Neutral' : 'Weak';
   const leverCls = leverage >= 1.5 ? 'stat-pos' : leverage < 0.8 ? 'stat-neg' : '';
-  const relLabel = ns.relations >= 65 ? 'Friendly' : ns.relations <= 35 ? 'Hostile' : 'Neutral';
-  const relCls   = ns.relations >= 65 ? 'stat-pos' : ns.relations <= 35 ? 'stat-neg' : '';
-  const CATS     = ['rawMaterials', 'manufacturedGoods', 'financialServices'];
-  const CN       = { rawMaterials: 'Raw Materials', manufacturedGoods: 'Manuf. Goods', financialServices: 'Financial Svc' };
+  const { label: relLabel, cssClass: relCls } = getRelationsTier(ns.relations);
   const fmt2     = v => fmt(v);
 
+  // Build a table showing what the nation wants and what the player can currently supply/sell.
+  function _resourceProfileRows(sectionLabel, profileKey) {
+    const profile     = def.trade[profileKey] || {};
+    const playerOut   = getPlayerResourceOutput();
+    const rows = Object.entries(profile).map(([rid, mult]) => {
+      const maxVol    = Math.max(1, Math.round(TRADE_VOLUME_BASE * mult));
+      const rt        = RESOURCE_TYPES[rid];
+      if (!rt) return '';
+      if (profileKey === 'demandByResource') {
+        const available = playerOut[rid] || 0;
+        const canExport = Math.min(available, maxVol);
+        const cls       = canExport > 0 ? 'stat-pos' : 'stat-neg';
+        return `<div class="neg-res-row">
+          <span class="neg-res-icon">${rt.icon}</span>
+          <span class="neg-res-name">${rt.name}</span>
+          <span class="neg-res-cap">wants up to ${maxVol} Mt</span>
+          <span class="neg-res-avail ${cls}">${canExport > 0 ? 'you have ' + available + ' Mt' : 'none produced'}</span>
+        </div>`;
+      } else {
+        const playerHas  = playerOut[rid] || 0;
+        const shortfall  = Math.max(0, maxVol - playerHas);
+        const cls        = shortfall > 0 ? 'stat-pos' : 'effect-neutral';
+        return `<div class="neg-res-row">
+          <span class="neg-res-icon">${rt.icon}</span>
+          <span class="neg-res-name">${rt.name}</span>
+          <span class="neg-res-cap">offers up to ${maxVol} Mt</span>
+          <span class="neg-res-avail ${cls}">${shortfall > 0 ? 'saves ' + shortfall + ' Mt import' : 'you produce this'}</span>
+        </div>`;
+      }
+    }).filter(Boolean).join('');
+    return rows ? `<div class="neg-section-label">${sectionLabel}</div>${rows}` : '';
+  }
+
   if (neg.status === 'drafting') {
-    const exportRows = CATS.map(cat => {
-      const maxVol = getTradeMaxVolume(neg.nationId, cat, 'export');
-      const curVol = (neg.exportItems.find(i => i.cat === cat) || { volume: 0 }).volume;
-      return `<div class="neg-vol-row">
-        <span class="neg-vol-label">${CN[cat]}</span>
-        <input type="range" min="0" max="${maxVol}" value="${curVol}" class="neg-vol-slider"
-          oninput="setNegotiationExportVolume('${cat}',this.value)">
-        <input type="number" min="0" max="${maxVol}" value="${curVol}" class="neg-vol-input"
-          onchange="setNegotiationExportVolume('${cat}',this.value)">
-        <span class="neg-vol-max">/${maxVol}</span>
-      </div>`;
-    }).join('');
-    const importRows = CATS.map(cat => {
-      const maxVol = getTradeMaxVolume(neg.nationId, cat, 'import');
-      const curVol = (neg.importItems.find(i => i.cat === cat) || { volume: 0 }).volume;
-      return `<div class="neg-vol-row">
-        <span class="neg-vol-label">${CN[cat]}</span>
-        <input type="range" min="0" max="${maxVol}" value="${curVol}" class="neg-vol-slider"
-          oninput="setNegotiationImportVolume('${cat}',this.value)">
-        <input type="number" min="0" max="${maxVol}" value="${curVol}" class="neg-vol-input"
-          onchange="setNegotiationImportVolume('${cat}',this.value)">
-        <span class="neg-vol-max">/${maxVol}</span>
-      </div>`;
-    }).join('');
-    const draftIncome = (neg.exportItems || []).reduce((s, { cat, volume }) =>
-      s + volume * TRADE_EXPORT_INCOME_PER_UNIT * 0.5, 0);
+    // Estimate income at base quality + tech bonuses, full maturity for preview
+    const te_prev     = getTechEffects();
+    const previewQuality  = Math.min(TRADE_OFFER_QUALITY_MAX, TRADE_OFFER_QUALITY_BASE + te_prev.tradeExportQualityBonus);
+    const previewImportQ  = Math.max(0.1, TRADE_IMPORT_PRICE_BASE - te_prev.tradeImportPriceReduction);
+    const previewRoute    = { nationId: neg.nationId, exportQuality: previewQuality, importQuality: previewImportQ, maturity: TRADE_ROUTE_MATURITY_TURNS };
+    const estExport  = getTradeRouteExportIncome(previewRoute);
+    const estImport  = getTradeRouteImportSaving(previewRoute);
+    const estTotal   = estExport + estImport;
+
     const threatened    = neg.threatenNext;
     const threatRelCost = getPushRelationsCost(0, true);
     const threatCollapse = getPushCollapseRisk(neg.nationId, 0, true);
     const threatColCls  = threatCollapse >= 0.3 ? 'stat-neg' : threatCollapse >= 0.1 ? 'effect-neutral' : 'stat-pos';
     const threatQBonus  = (TRADE_OFFER_QUALITY_THREATEN * 100).toFixed(0);
+
+    const exportSection = _resourceProfileRows('They buy (your exports)', 'demandByResource');
+    const importSection = _resourceProfileRows('They sell (your imports)', 'supplyByResource');
+
     return `<div class="neg-panel">
       <div class="neg-header">
         <span class="neg-title">Negotiating with ${def.name}</span>
@@ -65,11 +92,9 @@ function _buildNegotiationPanel(neg) {
         Relations: <span class="${relCls}">${ns.relations.toFixed(0)} — ${relLabel}</span>
         &nbsp;·&nbsp; Leverage: <span class="${leverCls}">${leverStr} (${leverage.toFixed(2)}×)</span>
       </div>
-      <div class="neg-section-label">You export <em>(income)</em></div>
-      ${exportRows}
-      <div class="neg-section-label" style="margin-top:6px">You import <em>(Phase 3.5 — no cost yet)</em></div>
-      ${importRows}
-      ${draftIncome > 0 ? `<div class="neg-income-hint">~+${fmt2(draftIncome)}/turn at 50% quality</div>` : ''}
+      ${exportSection}
+      ${importSection}
+      ${estTotal > 0 ? `<div class="neg-income-hint">Est. at base quality, full maturity: <span class="stat-pos">+${fmt2(estExport)}/turn</span> export${estImport > 0 ? ` + <span class="stat-pos">+${fmt2(estImport)}/turn</span> import savings` : ''}</div>` : '<div class="neg-income-hint stat-neg">No deposits yet — trade income requires producing resources.</div>'}
       <div class="neg-push-section">
         <label class="neg-threat-toggle">
           <input type="checkbox" ${threatened ? 'checked' : ''} onchange="toggleNegotiationThreat()">
@@ -97,17 +122,18 @@ function _buildNegotiationPanel(neg) {
   }
 
   if (neg.status === 'countered') {
-    const offer      = neg.nationOffer;
-    const projIncome = (neg.exportItems || []).reduce((s, { cat, volume }) =>
-      s + volume * TRADE_EXPORT_INCOME_PER_UNIT * offer.exportQuality, 0);
+    const offer         = neg.nationOffer;
+    const projRoute     = { nationId: neg.nationId, exportQuality: offer.exportQuality, importQuality: offer.importQuality, maturity: TRADE_ROUTE_MATURITY_TURNS };
+    const projExport    = getTradeRouteExportIncome(projRoute);
+    const projImport    = getTradeRouteImportSaving(projRoute);
+    const projTotal     = projExport + projImport;
     const nextPush      = neg.pushCount + 1;
     const threatened    = neg.threatenNext;
     const collapseRisk  = getPushCollapseRisk(neg.nationId, nextPush, threatened);
     const relsCost      = getPushRelationsCost(nextPush, threatened);
     const nextOffer     = getNationCounterOffer(neg.nationId, nextPush, threatened);
     const colCls        = collapseRisk >= 0.3 ? 'stat-neg' : collapseRisk >= 0.1 ? 'effect-neutral' : 'stat-pos';
-    const expSummary    = neg.exportItems.map(i => `${i.volume}× ${CN[i.cat]}`).join(', ') || '—';
-    const impSummary    = neg.importItems.map(i => `${i.volume}× ${CN[i.cat]}`).join(', ') || '—';
+    const savingNote    = projImport > 0 ? ` + <span class="stat-pos">+${fmt2(projImport)}/turn</span> import savings` : '';
     return `<div class="neg-panel">
       <div class="neg-header">
         <span class="neg-title">Negotiating with ${def.name}</span>
@@ -118,11 +144,11 @@ function _buildNegotiationPanel(neg) {
         &nbsp;·&nbsp; Pushes so far: ${neg.pushCount}
       </div>
       <div class="neg-offer-box">
-        <div class="neg-offer-row"><span>You export</span><span>${expSummary}</span></div>
-        <div class="neg-offer-row"><span>You import</span><span>${impSummary}</span></div>
-        <div class="neg-offer-row"><span>Export price</span><span class="stat-pos">${(offer.exportQuality * 100).toFixed(0)}%</span></div>
-        <div class="neg-offer-row"><span>Import price</span><span class="effect-neutral">${(offer.importQuality * 100).toFixed(0)}% <em>(Phase 3.5)</em></span></div>
-        <div class="neg-offer-row"><span>Income at maturity</span><span class="stat-pos">+${fmt2(projIncome)}/turn</span></div>
+        <div class="neg-offer-row"><span>Export quality</span><span class="stat-pos">${(offer.exportQuality * 100).toFixed(0)}%</span></div>
+        <div class="neg-offer-row"><span>Import price</span><span class="effect-neutral">${(offer.importQuality * 100).toFixed(0)}% — savings: ${((1 - offer.importQuality) * 100).toFixed(0)}%</span></div>
+        <div class="neg-offer-row"><span>Export income at maturity</span><span class="stat-pos">+${fmt2(projExport)}/turn</span></div>
+        ${projImport > 0 ? `<div class="neg-offer-row"><span>Import savings at maturity</span><span class="stat-pos">+${fmt2(projImport)}/turn</span></div>` : ''}
+        <div class="neg-offer-row"><span>Total value at maturity</span><span class="stat-pos">+${fmt2(projTotal)}/turn</span></div>
       </div>
       <div class="neg-push-section">
         <label class="neg-threat-toggle">
@@ -151,6 +177,21 @@ function renderAll() {
   renderHeader();
   renderPolicies();
   renderDashboard();
+  renderTabBar();
+}
+
+// Update tab button locked/unlocked state based on current tech unlocks.
+function renderTabBar() {
+  const btn = document.getElementById('tab-btn-diplomacy');
+  if (!btn) return;
+  const hasTech = G.unlockedTechs.includes('diplomacyCorps');
+  if (hasTech) {
+    btn.classList.remove('tab-btn-locked');
+    btn.textContent = 'Diplomacy';
+  } else {
+    btn.classList.add('tab-btn-locked');
+    btn.textContent = '\uD83D\uDD12 Diplomacy';
+  }
 }
 
 function updateBudgetProjection() {
@@ -368,7 +409,6 @@ function renderDashboard() {
     const count        = G.tradeRoutes.length;
     const totalIncome  = getTotalTradeIncome();
     const routeTotal   = count > 0 ? ' · +' + fmt(totalIncome) + '/turn' : '';
-    const CN           = { rawMaterials: 'Raw Materials', manufacturedGoods: 'Manuf. Goods', financialServices: 'Financial Svc' };
 
     const negotiationHtml = G.activeNegotiation ? _buildNegotiationPanel(G.activeNegotiation) : '';
     const hintHtml = !G.activeNegotiation
@@ -379,28 +419,46 @@ function renderDashboard() {
     if (count === 0) {
       routeListHtml = '<div class="tr-empty">No active trade routes.</div>';
     } else {
+      const playerOut = getPlayerResourceOutput();
       for (const route of G.tradeRoutes) {
-        const routeIncome  = getTradeRouteIncome(route);
+        const routeExport  = getTradeRouteExportIncome(route);
+        const routeImport  = getTradeRouteImportSaving(route);
+        const routeIncome  = routeExport + routeImport;
         const maturityPct  = Math.min(100, (route.maturity / TRADE_ROUTE_MATURITY_TURNS) * 100).toFixed(0);
         const nationName   = NATIONS[route.nationId]?.name || 'Unknown';
-        const expLabel     = (route.exportItems || []).length
-          ? route.exportItems.map(i => i.volume + '× ' + CN[i.cat]).join(', ')
-          : '—';
-        const impLabel     = (route.importItems || []).length
-          ? route.importItems.map(i => i.volume + '× ' + CN[i.cat]).join(', ')
-          : '—';
         const eqLabel      = route.exportQuality ? (route.exportQuality * 100).toFixed(0) + '%' : '—';
+        const iqLabel      = route.importQuality ? (route.importQuality * 100).toFixed(0) + '%' : '—';
         const isNegotiating = G.activeNegotiation?.nationId === route.nationId;
+        const routeNs      = G.nations[route.nationId];
+        const routeRelTier = routeNs ? getRelationsTier(routeNs.relations) : { label: 'Neutral', cssClass: 'rel-neutral' };
+
+        // Build compact resource summary for export/import lines
+        const demands  = NATIONS[route.nationId]?.trade.demandByResource || {};
+        const supplies = NATIONS[route.nationId]?.trade.supplyByResource || {};
+        const expParts = Object.entries(demands)
+          .filter(([rid, m]) => (playerOut[rid] || 0) > 0)
+          .map(([rid]) => RESOURCE_TYPES[rid]?.icon + ' ' + RESOURCE_TYPES[rid]?.name)
+          .join(', ');
+        const impParts = Object.entries(supplies)
+          .filter(([rid, m]) => Math.max(0, Math.max(1, Math.round(TRADE_VOLUME_BASE * m)) - (playerOut[rid] || 0)) > 0)
+          .map(([rid]) => RESOURCE_TYPES[rid]?.icon + ' ' + RESOURCE_TYPES[rid]?.name)
+          .join(', ');
+
+        const incomeBreakdown = routeImport > 0
+          ? `+${fmt(routeExport)} export +${fmt(routeImport)} savings`
+          : `+${fmt(routeExport)} export`;
+
         routeListHtml += `
           <div class="tr-route-card">
             <div class="tr-route-info">
-              <span class="tr-route-partner">${nationName}</span>
-              <span class="tr-route-cats">Export: ${expLabel}</span>
-              <span class="tr-route-cats">Import: ${impLabel}</span>
-              <span class="tr-route-age">${route.maturity} turn${route.maturity !== 1 ? 's' : ''} · ${maturityPct}% mature · Quality ${eqLabel}</span>
+              <span class="tr-route-partner">${nationName}</span><span class="tr-route-rel ${routeRelTier.cssClass}">${routeRelTier.label}</span>
+              ${expParts ? `<span class="tr-route-cats">Exports: ${expParts}</span>` : `<span class="tr-route-cats stat-neg">No matching exports (no deposits)</span>`}
+              ${impParts ? `<span class="tr-route-cats">Import savings: ${impParts}</span>` : ''}
+              <span class="tr-route-age">${route.maturity} turn${route.maturity !== 1 ? 's' : ''} · ${maturityPct}% mature · Export ${eqLabel} · Import ${iqLabel}</span>
             </div>
             <div class="tr-route-right">
               <span class="tr-route-income">+${fmt(routeIncome)}/turn</span>
+              <span class="tr-route-breakdown">${incomeBreakdown}</span>
               ${!isNegotiating ? `<button class="btn-tr-renegotiate" onclick="openNegotiationFromRoute('${route.nationId}')">Renegotiate</button>` : ''}
               <button class="btn-tr-close-route" onclick="closeTradeRoute(${route.id})">✕</button>
             </div>
@@ -419,6 +477,10 @@ function renderDashboard() {
         ${hintHtml}
         <div class="tr-route-list">${routeListHtml}</div>
       </div>`;
+  }
+
+  if (tab === 'diplomacy') {
+    renderDiplomacy();
   }
 
   if (tab === 'statistics') {
@@ -527,8 +589,7 @@ function renderDashboard() {
     let nationRows = '';
     for (const [id, nation] of Object.entries(G.nations)) {
       const def = NATIONS[id];
-      const relClass = nation.relations >= 65 ? 'stat-pos' : nation.relations <= 35 ? 'stat-neg' : '';
-      const relLabel = nation.relations >= 65 ? 'Friendly' : nation.relations <= 35 ? 'Hostile' : 'Neutral';
+      const { label: relLabel, cssClass: relClass } = getRelationsTier(nation.relations);
       const milPct   = nation.militaryLevel.toFixed(0);
       nationRows += `<tr>
         <td>${def.name}</td>
@@ -1007,6 +1068,97 @@ function renderResourcesTab() {
 // WORLD MAP
 // ============================================================
 
+function renderDiplomacy() {
+  const el = document.getElementById('tab-diplomacy');
+  if (!el) return;
+
+  if (!G.unlockedTechs.includes('diplomacyCorps')) {
+    el.innerHTML = `
+      <div class="diplo-locked">
+        <div class="diplo-locked-icon">🤝</div>
+        <div class="diplo-locked-title">Diplomacy Corps</div>
+        <div class="diplo-locked-msg">Research <strong>Diplomacy Corps</strong> to unlock the Diplomacy screen.</div>
+      </div>`;
+    return;
+  }
+
+  const hasAlliances = G.unlockedTechs.includes('strategicAlliances');
+  const hasUN        = G.unlockedTechs.includes('unMembership');
+
+  let html = '<div class="diplo-panel">';
+  html += '<div class="diplo-panel-title">Diplomatic Relations</div>';
+  html += '<div class="diplo-nation-list">';
+
+  for (const [id, ns] of Object.entries(G.nations)) {
+    const def      = NATIONS[id];
+    const reg      = MAP_REGIONS[id];
+    const tier     = getRelationsTier(ns.relations);
+    const route    = G.tradeRoutes.find(r => r.nationId === id);
+    const matPct   = route ? Math.min(100, (route.maturity / TRADE_ROUTE_MATURITY_TURNS) * 100).toFixed(0) : 0;
+    const routeIncome = route ? getTradeRouteIncome(route) : 0;
+    const deal     = G.diplomaticDeals.find(d => d.nationId === id);
+    const nap      = deal && deal.type === 'nap'      ? deal : null;
+    const alliance = deal && deal.type === 'alliance' ? deal : null;
+
+    // --- Deals ---
+    let dealsHtml = '';
+    if (route) {
+      dealsHtml += `<span class="diplo-deal diplo-deal-active">🚢 Trade Route · ${route.maturity} turn${route.maturity !== 1 ? 's' : ''} · ${matPct}% mature · +${fmt(routeIncome)}/turn</span>`;
+    }
+    if (alliance) {
+      dealsHtml += `<span class="diplo-deal diplo-deal-alliance">🛡️ Allied</span>`;
+    }
+    if (nap) {
+      dealsHtml += `<span class="diplo-deal diplo-deal-nap">🕊️ Non-Aggression Pact — ${nap.turnsLeft} turn${nap.turnsLeft !== 1 ? 's' : ''} remaining</span>`;
+    }
+    if (!route && !alliance && !nap) {
+      dealsHtml += '<span class="diplo-deal diplo-deal-none">No active deals</span>';
+    }
+
+    // --- Action buttons ---
+    let actionsHtml = '';
+    if (hasAlliances && !alliance) {
+      const canAlliance = ns.relations >= ALLIANCE_MIN_PROPOSE_REL;
+      actionsHtml += `<button class="diplo-action-btn${canAlliance ? '' : ' diplo-action-btn-disabled'}" onclick="proposeAlliance('${id}')" ${canAlliance ? '' : 'disabled'} title="${canAlliance ? 'Propose an Alliance' : `Requires ${ALLIANCE_MIN_PROPOSE_REL}+ relations`}">🛡️ Propose Alliance</button>`;
+    }
+    if (alliance) {
+      actionsHtml += `<button class="diplo-action-btn diplo-action-btn-danger" onclick="breakAlliance('${id}')">Break Alliance</button>`;
+    }
+    if (!nap && !alliance) {
+      const canNap = ns.relations >= NAP_MIN_PROPOSE_REL;
+      actionsHtml += `<button class="diplo-action-btn${canNap ? '' : ' diplo-action-btn-disabled'}" onclick="proposeNap('${id}')" ${canNap ? '' : 'disabled'} title="${canNap ? 'Propose a Non-Aggression Pact' : 'Requires Neutral relations (0+)'}">🕊️ Propose NAP</button>`;
+    }
+
+    html += `
+      <div class="diplo-nation-card">
+        <div class="diplo-nation-header" style="border-left:3px solid ${reg.color}">
+          <span class="diplo-nation-name">${def.name}</span>
+          <span class="diplo-rel-badge ${tier.cssClass}">${ns.relations > 0 ? '+' : ''}${ns.relations} — ${tier.label}</span>
+        </div>
+        <div class="diplo-nation-meta">
+          <span>GDP $${ns.gdp.toFixed(0)}B</span>
+          <span>Military ${ns.militaryLevel.toFixed(0)}/100</span>
+          <span>Streak ${Math.floor(ns.relationsStreak)} turns</span>
+        </div>
+        <div class="diplo-deals">${dealsHtml}</div>
+        ${actionsHtml ? `<div class="diplo-actions">${actionsHtml}</div>` : ''}
+      </div>`;
+  }
+
+  html += '</div>';
+
+  if (hasUN) {
+    html += `
+      <div class="diplo-un-panel">
+        <span class="diplo-un-title">🌐 UN Member</span>
+        <span class="diplo-un-desc">International recognition grants +5 relations with all nations globally.</span>
+      </div>`;
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
 function renderWorldMap() {
   const panelEl = document.getElementById('tab-world');
   if (!panelEl) return;
@@ -1024,7 +1176,7 @@ function renderWorldMap() {
     const ns = G.nations[id];
     if (!ns) continue;
     const sel    = _mapSelectedNation === id ? ' map-region-selected' : '';
-    const relCls = ns.relations >= 65 ? ' map-region-friendly' : ns.relations <= 35 ? ' map-region-hostile' : '';
+    const relCls = ns.relations >= 20 ? ' map-region-friendly' : ns.relations <= -20 ? ' map-region-hostile' : '';
     svg += `<polygon class="map-region${relCls}${sel}" points="${region.points}" fill="${region.color}" onclick="selectMapNation('${id}')"/>`;
     svg += `<text class="map-label" x="${region.labelX}" y="${region.labelY}">${NATIONS[id].name}</text>`;
     svg += `<circle class="map-capital" cx="${region.capitalX}" cy="${region.capitalY}" r="3"/>`;
@@ -1046,31 +1198,37 @@ function renderWorldMap() {
     const ns   = G.nations[id];
     const def  = NATIONS[id];
     const reg  = MAP_REGIONS[id];
-    const relLabel = ns.relations >= 65 ? 'Friendly' : ns.relations <= 35 ? 'Hostile' : 'Neutral';
-    const relCls   = ns.relations >= 65 ? 'stat-pos'  : ns.relations <= 35 ? 'stat-neg'  : '';
+    const { label: relLabel, cssClass: relCls } = getRelationsTier(ns.relations);
     const borders  = (def.adjacency || []).map(a => a === 'player' ? G.empire : (NATIONS[a] ? NATIONS[a].name : a)).join(', ');
     const activeRoute   = G.tradeRoutes.find(r => r.nationId === id);
     const isNegotiating = G.activeNegotiation?.nationId === id;
-    const CN = { rawMaterials: 'Raw Materials', manufacturedGoods: 'Manuf. Goods', financialServices: 'Financial Svc' };
 
     // Trade section
     let tradeHtml = '';
     if (isNegotiating) {
       tradeHtml = _buildNegotiationPanel(G.activeNegotiation);
     } else if (activeRoute) {
-      const income = getTradeRouteIncome(activeRoute);
-      const matPct = Math.min(100, (activeRoute.maturity / TRADE_ROUTE_MATURITY_TURNS) * 100).toFixed(0);
-      const expLbl = (activeRoute.exportItems || []).length
-        ? activeRoute.exportItems.map(i => i.volume + '× ' + CN[i.cat]).join(', ') : '—';
-      const impLbl = (activeRoute.importItems || []).length
-        ? activeRoute.importItems.map(i => i.volume + '× ' + CN[i.cat]).join(', ') : '—';
-      const eqLbl  = activeRoute.exportQuality ? (activeRoute.exportQuality * 100).toFixed(0) + '%' : '—';
+      const routeExport = getTradeRouteExportIncome(activeRoute);
+      const routeImport = getTradeRouteImportSaving(activeRoute);
+      const income  = routeExport + routeImport;
+      const matPct  = Math.min(100, (activeRoute.maturity / TRADE_ROUTE_MATURITY_TURNS) * 100).toFixed(0);
+      const eqLbl   = activeRoute.exportQuality ? (activeRoute.exportQuality * 100).toFixed(0) + '%' : '—';
+      const iqLbl   = activeRoute.importQuality ? (activeRoute.importQuality * 100).toFixed(0) + '%' : '—';
+      const playerOut = getPlayerResourceOutput();
+      const demands   = def.trade.demandByResource || {};
+      const supplies  = def.trade.supplyByResource || {};
+      const expParts  = Object.entries(demands)
+        .filter(([rid]) => (playerOut[rid] || 0) > 0)
+        .map(([rid]) => RESOURCE_TYPES[rid]?.icon + ' ' + RESOURCE_TYPES[rid]?.name).join(', ') || '—';
+      const impParts  = Object.entries(supplies)
+        .filter(([rid, m]) => Math.max(0, Math.max(1, Math.round(TRADE_VOLUME_BASE * m)) - (playerOut[rid] || 0)) > 0)
+        .map(([rid]) => RESOURCE_TYPES[rid]?.icon + ' ' + RESOURCE_TYPES[rid]?.name).join(', ') || '—';
       tradeHtml = `
         <div class="map-trade-active">
           <div class="map-trade-status">🚢 Active Trade Route</div>
-          <div class="map-trade-detail">Export: ${expLbl}</div>
-          <div class="map-trade-detail">Import: ${impLbl}</div>
-          <div class="map-trade-detail">Quality ${eqLbl} · ${matPct}% mature · +${fmt(income)}/turn</div>
+          <div class="map-trade-detail">Exports: ${expParts}</div>
+          ${routeImport > 0 ? `<div class="map-trade-detail">Import savings: ${impParts}</div>` : ''}
+          <div class="map-trade-detail">Export ${eqLbl} · Import ${iqLbl} · ${matPct}% mature · +${fmt(income)}/turn</div>
           <button class="btn btn-sm" onclick="openNegotiationFromRoute('${id}')">Renegotiate</button>
           <button class="btn btn-sm btn-muted" onclick="closeTradeRoute(${activeRoute.id})">Close Route</button>
         </div>`;

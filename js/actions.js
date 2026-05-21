@@ -44,13 +44,7 @@ function setTaxRate(value) {
 // TRADE NEGOTIATION
 // ============================================================
 
-const TRADE_CAT_NAMES = {
-  rawMaterials:      'Raw Materials',
-  manufacturedGoods: 'Manufactured Goods',
-  financialServices: 'Financial Services',
-};
-
-// Start a negotiation in drafting state. Pre-fills from existing route if renegotiating.
+// Start a negotiation in drafting state.
 function startTradeNegotiation(nationId) {
   if (!G.nations[nationId]) return;
   const existing = G.tradeRoutes.find(r => r.nationId === nationId);
@@ -58,8 +52,6 @@ function startTradeNegotiation(nationId) {
     nationId,
     status:          'drafting',
     pushCount:       0,
-    exportItems:     existing ? existing.exportItems.map(i => ({ ...i })) : [],
-    importItems:     existing ? existing.importItems.map(i => ({ ...i })) : [],
     threatenNext:    false,
     nationOffer:     null,
     isRenegotiation: !!existing,
@@ -80,32 +72,6 @@ function openNegotiationFromRoute(nationId) {
   startTradeNegotiation(nationId);
 }
 
-// Set export volume for a category (0 = remove from list).
-function setNegotiationExportVolume(cat, volume) {
-  if (!G.activeNegotiation) return;
-  const max   = getTradeMaxVolume(G.activeNegotiation.nationId, cat, 'export');
-  const v     = Math.max(0, Math.min(parseInt(volume, 10) || 0, max));
-  const items = G.activeNegotiation.exportItems;
-  const idx   = items.findIndex(i => i.cat === cat);
-  if (v === 0)         { if (idx !== -1) items.splice(idx, 1); }
-  else if (idx !== -1) { items[idx].volume = v; }
-  else                 { items.push({ cat, volume: v }); }
-  renderAll();
-}
-
-// Set import volume for a category.
-function setNegotiationImportVolume(cat, volume) {
-  if (!G.activeNegotiation) return;
-  const max   = getTradeMaxVolume(G.activeNegotiation.nationId, cat, 'import');
-  const v     = Math.max(0, Math.min(parseInt(volume, 10) || 0, max));
-  const items = G.activeNegotiation.importItems;
-  const idx   = items.findIndex(i => i.cat === cat);
-  if (v === 0)         { if (idx !== -1) items.splice(idx, 1); }
-  else if (idx !== -1) { items[idx].volume = v; }
-  else                 { items.push({ cat, volume: v }); }
-  renderAll();
-}
-
 // Send drafted offer — nation responds at end of next turn.
 function proposeTradeOffer() {
   if (!G.activeNegotiation || G.activeNegotiation.status !== 'drafting') return;
@@ -113,7 +79,9 @@ function proposeTradeOffer() {
   const name = NATIONS[neg.nationId].name;
   if (neg.threatenNext) {
     const relsCost = getPushRelationsCost(0, true);
-    G.nations[neg.nationId].relations = Math.max(0, G.nations[neg.nationId].relations - relsCost);
+    const threatNs = G.nations[neg.nationId];
+    threatNs.relationsNegPenalty = Math.max(-100, threatNs.relationsNegPenalty - relsCost);
+    threatNs.relations = computeNationRelations(neg.nationId);
     addLog('Trade offer sent to ' + name + ' with threat. Relations −' + relsCost + '.', 'warn');
   } else {
     addLog('Trade offer sent to ' + name + ' — awaiting response next turn.', 'info');
@@ -129,7 +97,9 @@ function pushTradeNegotiation(threaten) {
   neg.pushCount++;
   neg.threatenNext = !!threaten;
   const relsCost = getPushRelationsCost(neg.pushCount, !!threaten);
-  G.nations[neg.nationId].relations = Math.max(0, G.nations[neg.nationId].relations - relsCost);
+  const pushNs = G.nations[neg.nationId];
+  pushNs.relationsNegPenalty = Math.max(-100, pushNs.relationsNegPenalty - relsCost);
+  pushNs.relations = computeNationRelations(neg.nationId);
   neg.status = 'awaiting';
   const name = NATIONS[neg.nationId].name;
   addLog(name + ': pushed terms' + (threaten ? ' with threat' : '') + '. Relations −' + relsCost + '.', 'warn');
@@ -147,12 +117,12 @@ function toggleNegotiationThreat() {
 function acceptNationCounter() {
   if (!G.activeNegotiation || !G.activeNegotiation.nationOffer) return;
   const neg = G.activeNegotiation;
-  _finaliseTradeRoute(neg.nationId, neg.exportItems, neg.importItems, neg.nationOffer, neg.isRenegotiation);
+  _finaliseTradeRoute(neg.nationId, neg.nationOffer, neg.isRenegotiation);
   G.activeNegotiation = null;
   renderAll();
 }
 
-// Reject counter — go back to drafting so player can modify terms.
+// Reject counter — go back to drafting so player can review nation profile before re-proposing.
 function rejectNationCounter() {
   if (!G.activeNegotiation) return;
   G.activeNegotiation.status    = 'drafting';
@@ -161,32 +131,33 @@ function rejectNationCounter() {
 }
 
 // Shared: create or update a trade route from finalised terms.
-function _finaliseTradeRoute(nationId, exportItems, importItems, offer, isRenegotiation) {
+function _finaliseTradeRoute(nationId, offer, isRenegotiation) {
   const { exportQuality, importQuality } = offer;
   if (isRenegotiation) {
     const route = G.tradeRoutes.find(r => r.nationId === nationId);
     if (route) {
-      route.exportItems   = exportItems.map(i => ({ ...i }));
-      route.importItems   = importItems.map(i => ({ ...i }));
       route.exportQuality = exportQuality;
       route.importQuality = importQuality;
     }
-    addLog('Trade deal with ' + NATIONS[nationId].name + ' renegotiated (export quality ' + (exportQuality * 100).toFixed(0) + '%).', 'good');
+    addLog('Trade deal with ' + NATIONS[nationId].name + ' renegotiated (export quality ' + (exportQuality * 100).toFixed(0) + '%, import price ' + (importQuality * 100).toFixed(0) + '%).', 'good');
     showNotification('🤝 Trade deal renegotiated with ' + NATIONS[nationId].name + '!', 'good');
   } else {
     G.tradeRoutes.push({
       id:           G.nextTradeRouteId++,
       nationId,
-      exportItems:  exportItems.map(i => ({ ...i })),
-      importItems:  importItems.map(i => ({ ...i })),
       exportQuality,
       importQuality,
       maturity:     0,
     });
-    const expNames = exportItems.length
-      ? exportItems.map(i => TRADE_CAT_NAMES[i.cat] + ' ×' + i.volume).join(', ')
-      : 'nothing';
-    addLog('Trade route opened with ' + NATIONS[nationId].name + ' — exporting ' + expNames + ' (quality ' + (exportQuality * 100).toFixed(0) + '%).', 'good');
+    const firstContactNs = G.nations[nationId];
+    if (firstContactNs) {
+      if (!firstContactNs.relationsFirstContact) {
+        firstContactNs.relationsFirstContact = true;
+        addLog('First contact with ' + NATIONS[nationId].name + ' established — relations +5 (permanent).', 'good');
+      }
+      firstContactNs.relations = computeNationRelations(nationId);
+    }
+    addLog('Trade route opened with ' + NATIONS[nationId].name + ' (export quality ' + (exportQuality * 100).toFixed(0) + '%, import price ' + (importQuality * 100).toFixed(0) + '%).', 'good');
     showNotification('🚢 Trade route opened with ' + NATIONS[nationId].name + '!', 'good');
   }
 }
@@ -202,7 +173,7 @@ function _processNegotiationResponse() {
     const acceptChance = getStraightAcceptChance(neg.nationId, neg.pushCount);
     if (Math.random() < acceptChance) {
       const offer = getNationCounterOffer(neg.nationId, neg.pushCount, neg.threatenNext);
-      _finaliseTradeRoute(neg.nationId, neg.exportItems, neg.importItems, offer, neg.isRenegotiation);
+      _finaliseTradeRoute(neg.nationId, offer, neg.isRenegotiation);
       addLog(name + ' accepted your trade terms outright!', 'good');
       showNotification('🎉 ' + name + ' accepted your terms!', 'good');
       G.activeNegotiation = null;
@@ -214,7 +185,10 @@ function _processNegotiationResponse() {
   if (neg.pushCount >= 1 || neg.threatenNext) {
     const collapseRisk = getPushCollapseRisk(neg.nationId, neg.pushCount, neg.threatenNext);
     if (Math.random() < collapseRisk) {
-      G.nations[neg.nationId].relations = Math.max(0, G.nations[neg.nationId].relations - 5);
+      const collapseNs = G.nations[neg.nationId];
+      collapseNs.relationsNegPenalty = Math.max(-100, collapseNs.relationsNegPenalty - 5);
+      collapseNs.relationsBrokenRoutes.push({ turn: G.turn });
+      collapseNs.relations = computeNationRelations(neg.nationId);
       addLog('Trade negotiations with ' + name + ' collapsed after ' + neg.pushCount + ' push' + (neg.pushCount !== 1 ? 'es' : '') + '. Relations −5.', 'bad');
       showNotification('💔 Negotiations with ' + name + ' collapsed!', 'bad');
       G.activeNegotiation = null;
@@ -241,6 +215,13 @@ function closeTradeRoute(routeId) {
   if (G.activeNegotiation && G.activeNegotiation.nationId === route.nationId) {
     G.activeNegotiation = null;
   }
+  // Register broken-route penalty — damages relations until it decays
+  const closedRouteNs = G.nations[route.nationId];
+  if (closedRouteNs) {
+    closedRouteNs.relationsBrokenRoutes.push({ turn: G.turn });
+    closedRouteNs.relations = computeNationRelations(route.nationId);
+  }
+  addLog('Trade route with ' + nationName + ' closed. Relations damaged.', 'warn');
   showNotification('Trade route with ' + nationName + ' closed.', 'info');
   renderAll();
 }
@@ -421,6 +402,78 @@ function setProjectFunding(projectId, amountStr) {
   updateBudgetProjection();
   renderHeader();
   renderDashboard();
+}
+
+// ============================================================
+// DIPLOMACY ACTIONS — Phase 4.4
+// ============================================================
+
+function proposeAlliance(nationId) {
+  const ns  = G.nations[nationId];
+  const def = NATIONS[nationId];
+  if (!G.unlockedTechs.includes('strategicAlliances')) {
+    showNotification('Requires Strategic Alliances technology.', 'warn');
+    return;
+  }
+  if (ns.relations < ALLIANCE_MIN_PROPOSE_REL) {
+    showNotification(`Relations must be at least ${ALLIANCE_MIN_PROPOSE_REL} (mid-Friendly) to propose an alliance.`, 'warn');
+    return;
+  }
+  if (G.diplomaticDeals.find(d => d.type === 'alliance' && d.nationId === nationId)) {
+    showNotification(`Already allied with ${def.name}.`, 'warn');
+    return;
+  }
+  if (ns.relations >= ALLIANCE_ACCEPT_REL) {
+    G.diplomaticDeals.push({ type: 'alliance', nationId, turnsLeft: null });
+    ns.relations = computeNationRelations(nationId);
+    addLog(`${def.name} accepted your Alliance proposal.`, 'success');
+    showNotification(`Alliance formed with ${def.name}!`, 'success');
+  } else {
+    ns.relationsNegPenalty = Math.max(-50, ns.relationsNegPenalty - 3);
+    ns.relations = computeNationRelations(nationId);
+    addLog(`${def.name} declined your Alliance proposal.`, 'warn');
+    showNotification(`${def.name} declined the alliance proposal.`, 'warn');
+  }
+  renderAll();
+}
+
+function proposeNap(nationId) {
+  const ns  = G.nations[nationId];
+  const def = NATIONS[nationId];
+  if (!G.unlockedTechs.includes('diplomacyCorps')) {
+    showNotification('Requires Diplomacy Corps technology.', 'warn');
+    return;
+  }
+  if (ns.relations < NAP_MIN_PROPOSE_REL) {
+    showNotification('Relations must be Neutral or better to propose a Non-Aggression Pact.', 'warn');
+    return;
+  }
+  if (G.diplomaticDeals.find(d => (d.type === 'nap' || d.type === 'alliance') && d.nationId === nationId)) {
+    showNotification('An existing pact or alliance is already active with this nation.', 'warn');
+    return;
+  }
+  if (ns.relations >= NAP_ACCEPT_REL) {
+    G.diplomaticDeals.push({ type: 'nap', nationId, turnsLeft: NAP_DURATION });
+    addLog(`${def.name} agreed to a Non-Aggression Pact (${NAP_DURATION} turns).`, 'success');
+    showNotification(`Non-Aggression Pact signed with ${def.name}!`, 'success');
+  } else {
+    addLog(`${def.name} declined your Non-Aggression Pact proposal.`, 'warn');
+    showNotification(`${def.name} declined the NAP proposal.`, 'warn');
+  }
+  renderAll();
+}
+
+function breakAlliance(nationId) {
+  const idx = G.diplomaticDeals.findIndex(d => d.type === 'alliance' && d.nationId === nationId);
+  if (idx === -1) return;
+  G.diplomaticDeals.splice(idx, 1);
+  const ns  = G.nations[nationId];
+  const def = NATIONS[nationId];
+  ns.relationsNegPenalty = Math.max(-100, ns.relationsNegPenalty + ALLIANCE_BREAK_PENALTY);
+  ns.relations = computeNationRelations(nationId);
+  addLog(`Alliance with ${def.name} dissolved. Relations damaged.`, 'warn');
+  showNotification(`Alliance with ${def.name} dissolved.`, 'warn');
+  renderAll();
 }
 
 function endTurn() {
@@ -722,15 +775,29 @@ function endTurn() {
   });
   if (G.history.length > 50) G.history.shift();
 
-  // 10. Tick AI nations — GDP growth, military drift, relations drift toward neutral
+  // 10. Tick AI nations — GDP growth, military drift, relations recompute
   for (const [id, nation] of Object.entries(G.nations)) {
     const def = NATIONS[id];
     nation.gdp           *= (1 + def.gdpGrowthRate);
     nation.militaryLevel += NATION_MILITARY_DRIFT_RATE * (def.militaryLevel - nation.militaryLevel);
-    nation.relations     += NATION_RELATIONS_DRIFT_RATE * (50 - nation.relations);
     nation.militaryLevel  = Math.max(0, Math.min(100, nation.militaryLevel));
-    nation.relations      = Math.max(0, Math.min(100, nation.relations));
+    // Relations: recover neg penalty, expire broken route events, update streak, recompute
+    nation.relationsNegPenalty   = Math.min(0, nation.relationsNegPenalty + NATION_RELATIONS_NEG_PENALTY_RECOVERY);
+    nation.relationsBrokenRoutes = nation.relationsBrokenRoutes.filter(ev => G.turn - ev.turn < NATION_RELATIONS_BROKEN_ROUTE_TURNS);
+    nation.relationsStreak       = G.tradeRoutes.some(r => r.nationId === id) ? nation.relationsStreak + 1 : 0;
+    nation.relations             = computeNationRelations(id);
   }
+
+  // 11. Tick diplomatic deals — expire NAPs
+  G.diplomaticDeals = G.diplomaticDeals.filter(deal => {
+    if (deal.turnsLeft === null) return true; // alliances are permanent until broken
+    deal.turnsLeft--;
+    if (deal.turnsLeft <= 0) {
+      addLog(`Non-Aggression Pact with ${NATIONS[deal.nationId].name} has expired.`, 'info');
+      return false;
+    }
+    return true;
+  });
 
   renderAll();
 }

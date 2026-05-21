@@ -47,16 +47,15 @@ function initGame(empireName) {
     projectFunding: {},      // { projectId: $M/turn allocation }
 
     // Trade routes — array of route objects
-    // { id, nationId, exportItems:[{cat,volume}], importItems:[{cat,volume}], exportQuality, importQuality, maturity }
+    // { id, nationId, exportQuality, importQuality, maturity }
     // exportQuality: what nation pays per export unit (0.25–1.2)
-    // importQuality: what player would pay per import unit (stored, Phase 3.5)
-    // Only exportItems generate income; importItems are placeholder until resources exist.
+    // importQuality: nation's asking price per import unit (lower = more savings for player)
+    // Income is computed dynamically from playerResourceOutput × nation demand/supply profiles.
     tradeRoutes: [],
     nextTradeRouteId: 1,
 
     // Active trade negotiation (null when not negotiating)
     // { nationId, status:'drafting'|'awaiting'|'countered', pushCount,
-    //   exportItems:[{cat,volume}], importItems:[{cat,volume}],
     //   threatenNext:bool, nationOffer:{exportQuality,importQuality}|null, isRenegotiation:bool }
     activeNegotiation: null,
 
@@ -103,14 +102,23 @@ function initGame(empireName) {
     },
 
     // AI nations — live state; static definitions are in NATIONS (data.js).
-    // { [id]: { gdp, militaryLevel, relations } }
+    // { [id]: { gdp, militaryLevel, relations, relationsNegPenalty, relationsFirstContact, relationsStreak, relationsBrokenRoutes } }
     nations: Object.fromEntries(
       Object.entries(NATIONS).map(([id, n]) => [id, {
-        gdp:           n.gdp,
-        militaryLevel: n.militaryLevel,
-        relations:     50,   // 0=hostile … 100=allied; starts neutral
+        gdp:                    n.gdp,
+        militaryLevel:          n.militaryLevel,
+        relations:              0,     // -100=hostile … +100=allied; starts at 0 (neutral); recomputed each turn
+        relationsNegPenalty:    0,     // accumulated from negotiation pushes/threats (negative; recovers slowly)
+        relationsFirstContact:  false, // one-time +5 bonus when first trade route is established
+        relationsStreak:        0,     // consecutive turns with an active trade route
+        relationsBrokenRoutes:  [],    // [{turn: N}] timestamps for decaying broken-route penalties
       }])
     ),
+
+    // Active diplomatic deals — Phase 4.4
+    // [{ type: 'nap'|'alliance', nationId: string, turnsLeft: number|null }]
+    // Alliance: turnsLeft = null (permanent until broken). NAP: turnsLeft = NAP_DURATION.
+    diplomaticDeals: [],
 
     // Turn-by-turn snapshots for the Statistics screen (last 50 turns)
     history: [],

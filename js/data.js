@@ -385,7 +385,65 @@ const TECHNOLOGIES = {
     unlocks: null,
     effects: { effectDesc: 'Enables Large → Vast deposit upgrades' }
   },
-};
+
+  // ============================================================
+  // TRADE & DIPLOMACY PATH
+  // ============================================================
+  tradeAgreements: {
+    id: 'tradeAgreements', name: 'Trade Agreements',
+    tier: 3, path: 'trade', cost: 80, icon: '📜',
+    description: 'Formalise international trade frameworks, giving your exporters an edge in all negotiations.',
+    requires: ['bankingSystem', 'marketRegulation'],
+    unlocks: null,
+    effects: { tradeExportQualityBonus: 0.10, effectDesc: '+10% base export quality in all negotiations' }
+  },
+  diplomacyCorps: {
+    id: 'diplomacyCorps', name: 'Diplomacy Corps',
+    tier: 4, path: 'trade', cost: 120, icon: '🤝',
+    description: 'Establish a professional diplomatic corps. Unlocks the Diplomacy screen.',
+    requires: ['tradeAgreements'],
+    unlocks: null,
+    effects: { effectDesc: 'Unlocks Diplomacy screen' }
+  },
+  culturalExchange: {
+    id: 'culturalExchange', name: 'Cultural Exchange',
+    tier: 5, path: 'trade', cost: 160, icon: '🎭',
+    description: 'Promote cultural ties with trade partners, strengthening diplomatic bonds.',
+    requires: ['diplomacyCorps'],
+    unlocks: null,
+    effects: { culturalExchangeRelationsBonus: 8, effectDesc: '+8 relations with every active trade partner' }
+  },
+  strategicAlliances: {
+    id: 'strategicAlliances', name: 'Strategic Alliances',
+    tier: 5, path: 'trade', cost: 200, icon: '🛡️',
+    description: 'Form strategic alliances with trusted nations. Unlocks Alliance actions on the Diplomacy screen.',
+    requires: ['diplomacyCorps'],
+    unlocks: null,
+    effects: { effectDesc: 'Unlocks Alliance and NAP actions on Diplomacy screen' }
+  },
+  culturalDiplomacy: {
+    id: 'culturalDiplomacy', name: 'Cultural Diplomacy',
+    tier: 5, path: 'trade', cost: 180, icon: '🎨',
+    description: 'Establish cultural institutions that build lasting goodwill with all foreign nations.',
+    requires: ['diplomacyCorps'],
+    unlocks: null,
+    effects: { cultureDiplomacyRelationsBonus: 12, effectDesc: '+12 base relations with all nations' }
+  },
+  economicUnions: {
+    id: 'economicUnions', name: 'Economic Unions',
+    tier: 6, path: 'trade', cost: 280, icon: '🏛️',
+    description: 'Deep economic integration reduces import asking prices across all trade negotiations.',
+    requires: ['tradeAgreements', 'diplomacyCorps'],
+    unlocks: null,
+    effects: { tradeImportPriceReduction: 0.15, effectDesc: '−15% import asking price in all negotiations' }
+  },  unMembership: {
+    id: 'unMembership', name: 'UN Membership',
+    tier: 6, path: 'trade', cost: 260, icon: '🌐',
+    description: 'Join the United Nations. International recognition grants a global relations bonus with all nations.',
+    requires: ['strategicAlliances'],
+    unlocks: null,
+    effects: { unRelationsBonus: 5, effectDesc: '+5 relations with all nations globally' }
+  },};
 
 // ============================================================
 // PROJECTS — large discrete investments built with direct treasury spend
@@ -513,8 +571,8 @@ const NATIONS = {
     gdpGrowthRate: 0.020,
     adjacency: ['player', 'sorenia', 'orzhan'],
     trade: {
-      demand: { rawMaterials: 0.8,  manufacturedGoods: 1.2, financialServices: 0.9 },
-      supply: { rawMaterials: 1.4,  manufacturedGoods: 0.8, financialServices: 0.7 },
+      demandByResource: { steel: 1.4, chemicals: 1.1, silicon: 0.8 },
+      supplyByResource: { timber: 1.8, coal: 1.2, iron: 0.9 },
     },
   },
   kethara: {
@@ -524,8 +582,8 @@ const NATIONS = {
     gdpGrowthRate: 0.030,
     adjacency: ['player', 'sorenia', 'marveth'],
     trade: {
-      demand: { rawMaterials: 1.2,  manufacturedGoods: 0.8, financialServices: 1.4 },
-      supply: { rawMaterials: 0.8,  manufacturedGoods: 1.6, financialServices: 1.0 },
+      demandByResource: { oil: 1.3, rareEarths: 1.0, copper: 1.2 },
+      supplyByResource: { steel: 1.6, chemicals: 1.3, silicon: 1.1 },
     },
   },
   orzhan: {
@@ -535,8 +593,8 @@ const NATIONS = {
     gdpGrowthRate: 0.010,
     adjacency: ['valdoria', 'nocthar', 'durenna'],
     trade: {
-      demand: { rawMaterials: 1.5,  manufacturedGoods: 1.0, financialServices: 0.6 },
-      supply: { rawMaterials: 0.7,  manufacturedGoods: 0.9, financialServices: 0.5 },
+      demandByResource: { steel: 1.2, chemicals: 1.0, timber: 0.8 },
+      supplyByResource: { iron: 1.5, coal: 1.4, copper: 0.7 },
     },
   },
   sorenia: {
@@ -546,8 +604,8 @@ const NATIONS = {
     gdpGrowthRate: 0.020,
     adjacency: ['valdoria', 'kethara'],
     trade: {
-      demand: { rawMaterials: 0.9,  manufacturedGoods: 1.3, financialServices: 1.2 },
-      supply: { rawMaterials: 1.2,  manufacturedGoods: 0.9, financialServices: 1.1 },
+      demandByResource: { iron: 1.1, coal: 0.9, timber: 1.0 },
+      supplyByResource: { silicon: 1.4, copper: 1.0, chemicals: 0.8 },
     },
   },
   iravan: {
@@ -557,8 +615,8 @@ const NATIONS = {
     gdpGrowthRate: 0.020,
     adjacency: ['marveth', 'nocthar', 'durenna'],
     trade: {
-      demand: { rawMaterials: 1.1,  manufacturedGoods: 0.9, financialServices: 0.8 },
-      supply: { rawMaterials: 1.6,  manufacturedGoods: 0.7, financialServices: 0.6 },
+      demandByResource: { steel: 1.0, chemicals: 0.9, silicon: 0.7 },
+      supplyByResource: { oil: 1.8, iron: 1.4, copper: 1.0 },
     },
   },
   durenna: {
@@ -568,8 +626,8 @@ const NATIONS = {
     gdpGrowthRate: 0.025,
     adjacency: ['orzhan', 'nocthar', 'iravan'],
     trade: {
-      demand: { rawMaterials: 1.4,  manufacturedGoods: 1.1, financialServices: 0.5 },
-      supply: { rawMaterials: 1.0,  manufacturedGoods: 0.8, financialServices: 0.4 },
+      demandByResource: { steel: 1.3, chemicals: 1.1, iron: 0.8 },
+      supplyByResource: { timber: 1.5, copper: 1.3, coal: 0.7 },
     },
   },
   marveth: {
@@ -579,8 +637,8 @@ const NATIONS = {
     gdpGrowthRate: 0.015,
     adjacency: ['player', 'kethara', 'iravan'],
     trade: {
-      demand: { rawMaterials: 0.7,  manufacturedGoods: 1.5, financialServices: 1.1 },
-      supply: { rawMaterials: 0.9,  manufacturedGoods: 1.3, financialServices: 0.8 },
+      demandByResource: { oil: 1.2, copper: 1.0, rareEarths: 0.8 },
+      supplyByResource: { chemicals: 1.4, steel: 1.2, silicon: 0.9 },
     },
   },
   nocthar: {
@@ -590,8 +648,8 @@ const NATIONS = {
     gdpGrowthRate: 0.015,
     adjacency: ['player', 'orzhan', 'iravan', 'durenna'],
     trade: {
-      demand: { rawMaterials: 1.0,  manufacturedGoods: 0.8, financialServices: 0.7 },
-      supply: { rawMaterials: 1.1,  manufacturedGoods: 1.0, financialServices: 0.9 },
+      demandByResource: { chemicals: 1.1, silicon: 0.9, timber: 0.7 },
+      supplyByResource: { coal: 1.3, iron: 1.1, oil: 0.8 },
     },
   },
 };

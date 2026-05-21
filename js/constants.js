@@ -56,10 +56,24 @@ const MANUFACTURING_IMPORT_COST_PER_LEVEL = 0.3; // $M/turn per level gap
 const TRADE_ROUTE_MATURITY_TURNS       = 50;    // turns for route to reach full maturity
 
 // Trade volume & income
-// Max export volume per category = round(TRADE_VOLUME_BASE × nationDemand[cat])
-// Income = volume × TRADE_EXPORT_INCOME_PER_UNIT × exportQuality × maturityMult
-const TRADE_VOLUME_BASE                = 10;    // base max units (before demand/supply multiplier)
-const TRADE_EXPORT_INCOME_PER_UNIT     = 0.6;   // $M/turn per unit at quality 1.0, full maturity
+// Max export/import volume for a resource = round(TRADE_VOLUME_BASE × nation demand/supply mult)
+const TRADE_VOLUME_BASE                = 10;    // base max volume (Mt) before demand/supply multiplier
+
+// Base export income per Mt traded at quality 1.0, full maturity — per resource type ($M/turn per Mt)
+const RESOURCE_EXPORT_PRICE = {
+  iron:       0.08,
+  coal:       0.06,
+  timber:     0.07,
+  steel:      0.15,
+  oil:        0.40,
+  chemicals:  0.25,
+  copper:     0.20,
+  silicon:    0.35,
+  rareEarths: 0.80,
+};
+// Import saving as a fraction of RESOURCE_EXPORT_PRICE per Mt of supply shortfall
+// Saving = price × FRAC × (1 − importQuality) × maturityMult
+const RESOURCE_IMPORT_SAVING_FRAC      = 0.30;
 
 // Trade negotiation — nation offer quality
 // exportQuality = clamp(BASE + (leverage/3)×LEVERAGE + pushCount×PUSH + threaten?THREATEN:0, MIN, MAX)
@@ -90,7 +104,7 @@ const TRADE_COLLAPSE_THREATEN_ADD      = 0.05;  // +5% when threatening
 // Trade negotiation — straight-accept probability (best outcome, requires pushCount >= 1)
 const TRADE_STRAIGHT_ACCEPT_BASE       = 0.05;  // 5% base chance
 const TRADE_STRAIGHT_ACCEPT_LEVERAGE   = 0.15;  // +15% per leverage point above 1.0
-const TRADE_STRAIGHT_ACCEPT_RELATIONS  = 0.005; // +0.5% per relations point above 50
+const TRADE_STRAIGHT_ACCEPT_RELATIONS  = 0.005; // +0.5% per relations point above 0 (neutral)
 
 // Population
 const POPULATION_START            = 10;     // starting population (millions)
@@ -108,8 +122,19 @@ const POPULATION_COST_EXPONENT    = 0.7;    // sub-linear exponent for healthcar
 const MILITARY_MANPOWER_RATIO     = 25;     // soft military strength cap per million citizens
 
 // AI Nations — per-turn tick behaviour (same for all nations in Phase 3.1)
-const NATION_MILITARY_DRIFT_RATE  = 0.05;   // fraction of gap closed per turn toward starting militaryLevel
-const NATION_RELATIONS_DRIFT_RATE = 0.2;    // points/turn relations drifts back toward 50 (neutral)
+const NATION_MILITARY_DRIFT_RATE            = 0.05;  // fraction of gap closed per turn toward starting militaryLevel
+const NATION_RELATIONS_NEG_PENALTY_RECOVERY = 2;     // points/turn the negotiation penalty recovers toward 0 (neutral)
+const NATION_RELATIONS_BROKEN_ROUTE_TURNS   = 5;     // turns a broken-route penalty takes to fully expire
+
+// Diplomacy Deals — Phase 4.4
+const NAP_DURATION             = 20;   // turns a Non-Aggression Pact lasts
+const ALLIANCE_MIN_PROPOSE_REL = 40;   // minimum relations score to propose an alliance
+const NAP_MIN_PROPOSE_REL      = 0;    // minimum relations score to propose a NAP
+const ALLIANCE_ACCEPT_REL      = 50;   // AI accepts an alliance proposal at this relations level or above
+const NAP_ACCEPT_REL           = 0;    // AI accepts a NAP proposal at this relations level or above
+const ALLIANCE_BREAK_PENALTY   = -25;  // added to relationsNegPenalty when breaking an alliance
+const ALLIANCE_RELATIONS_FLOOR = 20;   // allied nations' relations can't drop below this (Friendly tier)
+const ALLIANCE_RELATIONS_BONUS = 3;    // flat bonus added to allied nations' score in computeNationRelations
 
 // Resource Deposits — Phase 3.5
 // Prospecting policy builds G.prospectingLevel (0–100); level drives per-turn discovery chance.
