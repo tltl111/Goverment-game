@@ -39,8 +39,8 @@ Open `index.html` in a browser — no build step required.
 - Debt interest capped at 50%/turn; Finance level discounts interest
 - Dashboard tabs: Overview · Trade Routes · Research · Projects · Statistics · **World** · Events Log · **Resources**
 - Statistics screen: Economy Ledger, Sector Status, Research Tracker
-- **World map**: zoomable/pannable SVG continent; 8 AI nations as clickable regions; player empire as 4 provinces; click a nation to open trade negotiations or view existing routes
-- **AI nations**: 8 nations tick each turn (GDP growth, military drift, relations drift toward neutral); each has per-resource demand/supply profiles (iron, coal, timber, steel, oil, chemicals, copper, silicon, rare earths)
+- **World map**: zoomable/pannable SVG continent; 36 provinces across 9 nations; player empire as 6 provinces; AI nations rendered as multi-province territories; click a nation to open trade negotiations or view existing routes
+- **AI nations**: 8 nations tick each turn (GDP emergent from province development sum, grows by gdpGrowthRate; military drift; relations drift toward neutral); each has per-resource demand/supply profiles (iron, coal, timber, steel, oil, chemicals, copper, silicon, rare earths)
 - **Trade routes**: income driven by actual resource output vs nation demand; import savings when trade partners supply resources the player doesn't produce; export quality and import discount negotiated independently
 - **Relations system**: each AI nation has a relation score (−100 to +100) computed each turn from 12 factors (trade history, route maturity, streak, penalties, techs, deals). Five tiers: Hostile / Tense / Neutral / Friendly / Allied. Relations shown on world map, route cards, and Diplomacy screen.
 - **Diplomacy screen** (unlocked by Diplomacy Corps tech): nation cards with relation badge, GDP/military/streak stats, and active deals. Action buttons: Propose NAP (20-turn pact), Propose Alliance (permanent; +3 relations/turn + Friendly floor), Break Alliance. Cultural Diplomacy tech (+12 global relations); UN Membership tech (+5 global relations + UN panel). 7 techs in the Trade & Diplomacy path.

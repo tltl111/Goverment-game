@@ -559,14 +559,15 @@ const PROJECTS = {
 // NATIONS — static nation definitions. Starting stats only.
 // Per-turn AI behaviour is driven by constants in constants.js.
 // Live state is stored in G.nations (see state.js).
+// GDP is emergent: computed from province development × GDP_PER_PROVINCE_DEVELOPMENT at init.
 // ============================================================
 const NATIONS = {
   // demand: how much this nation wants to import from the player (>1 = high demand = player earns more)
   // supply: how well this nation can supply the player's imports (>1 = abundant = player saves more)
-  // Categories: rawMaterials, manufacturedGoods, financialServices
+  // color/label/capital: used by the world map renderer
   valdoria: {
     id: 'valdoria', name: 'Valdoria',
-    gdp: 800,
+    color: '#5e9c76', labelX: 172, labelY: 280, capitalX: 175, capitalY: 262,
     militaryLevel: 20,
     gdpGrowthRate: 0.020,
     adjacency: ['player', 'sorenia', 'orzhan'],
@@ -577,7 +578,7 @@ const NATIONS = {
   },
   kethara: {
     id: 'kethara', name: 'Kethara',
-    gdp: 1200,
+    color: '#c4884a', labelX: 395, labelY: 117, capitalX: 395, capitalY: 100,
     militaryLevel: 35,
     gdpGrowthRate: 0.030,
     adjacency: ['player', 'sorenia', 'marveth'],
@@ -588,7 +589,7 @@ const NATIONS = {
   },
   orzhan: {
     id: 'orzhan', name: 'Orzhan',
-    gdp: 600,
+    color: '#8a4a4a', labelX: 173, labelY: 412, capitalX: 173, capitalY: 394,
     militaryLevel: 70,
     gdpGrowthRate: 0.010,
     adjacency: ['valdoria', 'nocthar', 'durenna'],
@@ -599,7 +600,7 @@ const NATIONS = {
   },
   sorenia: {
     id: 'sorenia', name: 'Sorenia',
-    gdp: 500,
+    color: '#5a7da8', labelX: 155, labelY: 117, capitalX: 158, capitalY: 100,
     militaryLevel: 10,
     gdpGrowthRate: 0.020,
     adjacency: ['valdoria', 'kethara'],
@@ -610,7 +611,7 @@ const NATIONS = {
   },
   iravan: {
     id: 'iravan', name: 'Iravan',
-    gdp: 700,
+    color: '#b8924e', labelX: 615, labelY: 403, capitalX: 615, capitalY: 384,
     militaryLevel: 40,
     gdpGrowthRate: 0.020,
     adjacency: ['marveth', 'nocthar', 'durenna'],
@@ -621,7 +622,7 @@ const NATIONS = {
   },
   durenna: {
     id: 'durenna', name: 'Durenna',
-    gdp: 300,
+    color: '#6b8a5e', labelX: 364, labelY: 490, capitalX: 382, capitalY: 477,
     militaryLevel: 35,
     gdpGrowthRate: 0.025,
     adjacency: ['orzhan', 'nocthar', 'iravan'],
@@ -632,7 +633,7 @@ const NATIONS = {
   },
   marveth: {
     id: 'marveth', name: 'Marveth',
-    gdp: 500,
+    color: '#7a6b9e', labelX: 617, labelY: 195, capitalX: 640, capitalY: 175,
     militaryLevel: 20,
     gdpGrowthRate: 0.015,
     adjacency: ['player', 'kethara', 'iravan'],
@@ -643,7 +644,7 @@ const NATIONS = {
   },
   nocthar: {
     id: 'nocthar', name: 'Nocthar',
-    gdp: 550,
+    color: '#9e6b4a', labelX: 390, labelY: 412, capitalX: 412, capitalY: 393,
     militaryLevel: 55,
     gdpGrowthRate: 0.015,
     adjacency: ['player', 'orzhan', 'iravan', 'durenna'],
@@ -655,74 +656,350 @@ const NATIONS = {
 };
 
 // ============================================================
-// MAP_REGIONS — SVG polygon coordinates and visual data for the world map.
+// PLAYER_MAP — label and capital-dot positions for the player empire.
+// ============================================================
+const PLAYER_MAP = { labelX: 393, labelY: 262, capitalX: 393, capitalY: 248 };
+
+// ============================================================
+// PROVINCES — all map provinces, keyed by province ID.
 // Coordinate space: 800 × 560 viewBox. Single continent layout.
 //
-// Shared border vertices:
-//   A=(280,30)  B=(510,28)  C=(75,200)   D=(280,195)  E=(510,200)
-//   F=(740,200) G=(75,360)  H=(270,360)  I=(510,355)  J=(730,330)
-//   K1=(75,460) K2=(270,460) K3=(510,460) K4=(720,460)
+// Shared inter-province border vertices (reference):
+//   Venmoor/Stormfen split : y=130, x=75→280
+//   Stormfen/Redfen split  : x=175, y=130→195
+//   Kethara N/S split      : y=113, x=280→510
+//   Kethara W/E split      : x=395, y=29→197
+//   Marveth N/S cuts       : y=150 (N), y=270 (S)
+//   Marveth NW/NE split    : x=625, y=47→150
+//   Valdoria N/S split     : y=280, x=75→275
+//   Valdoria W/E split     : x=175, y=200→360
+//   Player N/S cuts        : y=278 (N), y=320 (S)
+//   Player W/E split       : x=392–395, y=195→358
+//   Orzhan N/S split       : y=410, x=75→270
+//   Orzhan W/E split       : x=175, y=360→410
+//   Nocthar W/E split      : x=390, y=358→460
+//   Nocthar N/S split      : y=408, x=270→510
+//   Iravan W/E split       : x=620, y=343→460
+//   Iravan N/S split       : y=410, x=510→724
+//   Durenna W/E cuts       : x=230, x=400, x=580
 //
-// Player empire borders: Valdoria (west), Kethara (north), Marveth (east), Nocthar (south)
+// Each province:
+//   nationId    — owning nation ('player' for the player empire)
+//   name        — display name
+//   points      — SVG polygon points string
+//   labelX/Y    — text label position (shown for player provinces; stored for all)
+//   adjacency   — neighbouring province IDs (land borders; gates conquest in Phase 5.5)
+//   development — economic level 1–5; Σ(dev) × GDP_PER_PROVINCE_DEVELOPMENT = nation GDP
+//   infraLevel  — infrastructure level 1–3
+//   deposit     — hidden resource type (null = none; revealed by prospecting post-conquest)
+//   depositSlots— max simultaneous deposit investigations allowed in this province
+//   color       — SVG fill colour
 // ============================================================
-const MAP_REGIONS = {
-  sorenia: {
-    points: '90,70 160,40 280,30 280,195 75,200 75,130',
-    labelX: 155, labelY: 117,
-    capitalX: 158, capitalY: 100,
+const PROVINCES = {
+
+  // ---- SORENIA ----
+  venmoor: {
+    nationId: 'sorenia', name: 'Venmoor',
+    points: '90,70 160,40 280,30 280,130 75,130',
+    labelX: 177, labelY: 83,
+    adjacency: ['stormfen', 'redfen', 'aldenmere', 'veldmoor'],
+    development: 2, infraLevel: 2, deposit: 'copper', depositSlots: 2,
     color: '#5a7da8',
   },
-  kethara: {
-    points: '280,30 510,28 510,200 280,195',
-    labelX: 395, labelY: 117,
-    capitalX: 395, capitalY: 100,
+  stormfen: {
+    nationId: 'sorenia', name: 'Stormfen',
+    points: '75,130 175,130 175,195 75,200',
+    labelX: 125, labelY: 163,
+    adjacency: ['venmoor', 'redfen', 'greenvale'],
+    development: 1, infraLevel: 1, deposit: 'silicon', depositSlots: 2,
+    color: '#4e6e96',
+  },
+  redfen: {
+    nationId: 'sorenia', name: 'Redfen',
+    points: '175,130 280,130 280,195 175,195',
+    labelX: 228, labelY: 163,
+    adjacency: ['venmoor', 'stormfen', 'veldmoor', 'ironfields'],
+    development: 2, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#668cb8',
+  },
+
+  // ---- KETHARA ----
+  aldenmere: {
+    nationId: 'kethara', name: 'Aldenmere',
+    points: '280,30 395,29 395,113 280,113',
+    labelX: 338, labelY: 71,
+    adjacency: ['ironspire', 'veldmoor', 'venmoor'],
+    development: 4, infraLevel: 3, deposit: 'chemicals', depositSlots: 2,
+    color: '#d4996a',
+  },
+  ironspire: {
+    nationId: 'kethara', name: 'Ironspire',
+    points: '395,29 510,28 510,113 395,113',
+    labelX: 453, labelY: 71,
+    adjacency: ['aldenmere', 'kestwall', 'havenport'],
+    development: 3, infraLevel: 2, deposit: null, depositSlots: 2,
     color: '#c4884a',
   },
-  marveth: {
-    points: '510,28 640,50 730,110 740,200 730,330 510,355 510,200',
-    labelX: 617, labelY: 195,
-    capitalX: 640, capitalY: 175,
+  veldmoor: {
+    nationId: 'kethara', name: 'Veldmoor',
+    points: '280,113 395,113 395,197 280,195',
+    labelX: 338, labelY: 155,
+    adjacency: ['aldenmere', 'kestwall', 'venmoor', 'redfen', 'arvenmoor'],
+    development: 3, infraLevel: 2, deposit: null, depositSlots: 2,
+    color: '#b8793e',
+  },
+  kestwall: {
+    nationId: 'kethara', name: 'Kestwall',
+    points: '395,113 510,113 510,200 395,197',
+    labelX: 453, labelY: 156,
+    adjacency: ['ironspire', 'veldmoor', 'havenport', 'silverwatch', 'caldrath'],
+    development: 2, infraLevel: 2, deposit: 'steel', depositSlots: 2,
+    color: '#ac6a32',
+  },
+
+  // ---- MARVETH ----
+  havenport: {
+    nationId: 'marveth', name: 'Havenport',
+    points: '510,28 625,47 625,150 510,150',
+    labelX: 568, labelY: 94,
+    adjacency: ['marport', 'silverwatch', 'ironspire', 'kestwall'],
+    development: 2, infraLevel: 2, deposit: 'chemicals', depositSlots: 2,
     color: '#7a6b9e',
   },
-  valdoria: {
-    points: '75,200 280,195 270,360 75,360',
-    labelX: 172, labelY: 280,
-    capitalX: 175, capitalY: 262,
+  marport: {
+    nationId: 'marveth', name: 'Marport',
+    points: '625,47 640,50 730,110 734,150 625,150',
+    labelX: 671, labelY: 101,
+    adjacency: ['havenport', 'silverwatch'],
+    development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#6b5c8e',
+  },
+  silverwatch: {
+    nationId: 'marveth', name: 'Silverwatch',
+    points: '510,150 734,150 740,200 735,270 510,270',
+    labelX: 622, labelY: 210,
+    adjacency: ['havenport', 'marport', 'deepstone', 'kestwall', 'caldrath'],
+    development: 1, infraLevel: 1, deposit: 'silicon', depositSlots: 2,
+    color: '#8a7aae',
+  },
+  deepstone: {
+    nationId: 'marveth', name: 'Deepstone',
+    points: '510,270 735,270 730,330 510,355',
+    labelX: 622, labelY: 306,
+    adjacency: ['silverwatch', 'selmark', 'crestmere', 'iraportal', 'iraboreal'],
+    development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#6a5b8e',
+  },
+
+  // ---- VALDORIA ----
+  greenvale: {
+    nationId: 'valdoria', name: 'Greenvale',
+    points: '75,200 175,198 175,280 75,280',
+    labelX: 125, labelY: 240,
+    adjacency: ['ironfields', 'ashwood', 'stormfen'],
+    development: 2, infraLevel: 2, deposit: 'timber', depositSlots: 2,
     color: '#5e9c76',
   },
-  orzhan: {
-    points: '75,360 270,360 270,460 75,460',
-    labelX: 173, labelY: 412,
-    capitalX: 173, capitalY: 394,
+  ironfields: {
+    nationId: 'valdoria', name: 'Ironfields',
+    points: '175,198 280,195 275,280 175,280',
+    labelX: 226, labelY: 238,
+    adjacency: ['greenvale', 'duskholm', 'redfen', 'arvenmoor'],
+    development: 3, infraLevel: 2, deposit: 'iron', depositSlots: 2,
+    color: '#6eac86',
+  },
+  ashwood: {
+    nationId: 'valdoria', name: 'Ashwood',
+    points: '75,280 175,280 175,360 75,360',
+    labelX: 125, labelY: 320,
+    adjacency: ['greenvale', 'duskholm', 'gorrath'],
+    development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#4e8c66',
+  },
+  duskholm: {
+    nationId: 'valdoria', name: 'Duskholm',
+    points: '175,280 275,280 270,360 175,360',
+    labelX: 224, labelY: 320,
+    adjacency: ['ironfields', 'ashwood', 'thornhaven', 'dawnford', 'ironhold'],
+    development: 2, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#5a9872',
+  },
+
+  // ---- PLAYER ----
+  arvenmoor: {
+    nationId: 'player', name: 'Arvenmoor',
+    points: '280,195 395,198 395,278 275,278',
+    labelX: 333, labelY: 240,
+    adjacency: ['caldrath', 'thornhaven', 'veldmoor', 'ironfields'],
+    development: 3, infraLevel: 2, deposit: null, depositSlots: 4,
+    color: '#1a5898',
+  },
+  caldrath: {
+    nationId: 'player', name: 'Caldrath',
+    points: '395,198 510,200 510,278 395,278',
+    labelX: 452, labelY: 240,
+    adjacency: ['arvenmoor', 'selmark', 'kestwall', 'silverwatch'],
+    development: 2, infraLevel: 2, deposit: null, depositSlots: 2,
+    color: '#205ea8',
+  },
+  thornhaven: {
+    nationId: 'player', name: 'Thornhaven',
+    points: '275,278 395,278 392,320 272,320',
+    labelX: 334, labelY: 299,
+    adjacency: ['arvenmoor', 'selmark', 'duskholm', 'dawnford'],
+    development: 2, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#184898',
+  },
+  selmark: {
+    nationId: 'player', name: 'Selmark',
+    points: '395,278 510,278 510,320 392,320',
+    labelX: 452, labelY: 299,
+    adjacency: ['caldrath', 'thornhaven', 'crestmere', 'deepstone'],
+    development: 2, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#2860b0',
+  },
+  dawnford: {
+    nationId: 'player', name: 'Dawnford',
+    points: '272,320 392,320 390,358 270,360',
+    labelX: 331, labelY: 340,
+    adjacency: ['thornhaven', 'crestmere', 'duskholm', 'duskwall', 'ironhold'],
+    development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#1e52a0',
+  },
+  crestmere: {
+    nationId: 'player', name: 'Crestmere',
+    points: '392,320 510,320 510,355 390,358',
+    labelX: 450, labelY: 338,
+    adjacency: ['selmark', 'dawnford', 'deepstone', 'stonereach'],
+    development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#2258a8',
+  },
+
+  // ---- ORZHAN ----
+  gorrath: {
+    nationId: 'orzhan', name: 'Gorrath',
+    points: '75,360 175,360 175,410 75,410',
+    labelX: 125, labelY: 385,
+    adjacency: ['ironhold', 'ashpeak', 'ashwood'],
+    development: 2, infraLevel: 1, deposit: null, depositSlots: 2,
     color: '#8a4a4a',
   },
-  nocthar: {
-    points: '270,360 510,355 510,460 270,460',
-    labelX: 390, labelY: 412,
-    capitalX: 412, capitalY: 393,
+  ironhold: {
+    nationId: 'orzhan', name: 'Ironhold',
+    points: '175,360 270,360 270,410 175,410',
+    labelX: 223, labelY: 385,
+    adjacency: ['gorrath', 'ashpeak', 'duskholm', 'duskwall'],
+    development: 3, infraLevel: 2, deposit: 'iron', depositSlots: 2,
+    color: '#9a5a5a',
+  },
+  ashpeak: {
+    nationId: 'orzhan', name: 'Ashpeak',
+    points: '75,410 270,410 270,460 75,460',
+    labelX: 173, labelY: 435,
+    adjacency: ['gorrath', 'ironhold', 'greensward', 'midvale', 'ashvale'],
+    development: 1, infraLevel: 1, deposit: 'coal', depositSlots: 2,
+    color: '#7a3a3a',
+  },
+
+  // ---- NOCTHAR ----
+  duskwall: {
+    nationId: 'nocthar', name: 'Duskwall',
+    points: '270,360 390,358 390,408 270,408',
+    labelX: 330, labelY: 384,
+    adjacency: ['stonereach', 'ashvale', 'ironhold', 'dawnford'],
+    development: 2, infraLevel: 2, deposit: 'coal', depositSlots: 2,
     color: '#9e6b4a',
   },
-  iravan: {
-    points: '510,355 730,330 720,460 510,460',
-    labelX: 615, labelY: 403,
-    capitalX: 615, capitalY: 384,
+  stonereach: {
+    nationId: 'nocthar', name: 'Stonereach',
+    points: '390,358 510,355 510,408 390,408',
+    labelX: 450, labelY: 382,
+    adjacency: ['duskwall', 'grimholt', 'crestmere', 'iraportal'],
+    development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#8e5b3a',
+  },
+  ashvale: {
+    nationId: 'nocthar', name: 'Ashvale',
+    points: '270,408 390,408 390,460 270,460',
+    labelX: 330, labelY: 434,
+    adjacency: ['duskwall', 'grimholt', 'ashpeak', 'midvale'],
+    development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#ae7b5a',
+  },
+  grimholt: {
+    nationId: 'nocthar', name: 'Grimholt',
+    points: '390,408 510,408 510,460 390,460',
+    labelX: 450, labelY: 434,
+    adjacency: ['stonereach', 'ashvale', 'iracoast', 'ashbrook'],
+    development: 1, infraLevel: 1, deposit: 'oil', depositSlots: 2,
+    color: '#8a5740',
+  },
+
+  // ---- IRAVAN ----
+  iraportal: {
+    nationId: 'iravan', name: 'Iraportal',
+    points: '510,355 620,343 620,410 510,410',
+    labelX: 565, labelY: 380,
+    adjacency: ['iraboreal', 'iracoast', 'stonereach', 'deepstone'],
+    development: 2, infraLevel: 2, deposit: 'oil', depositSlots: 2,
     color: '#b8924e',
   },
-  durenna: {
-    points: '75,460 270,460 510,460 720,460 680,490 550,510 400,520 250,515 100,500 80,470',
-    labelX: 364, labelY: 490,
-    capitalX: 382, capitalY: 477,
+  iraboreal: {
+    nationId: 'iravan', name: 'Iraboreal',
+    points: '620,343 730,330 724,410 620,410',
+    labelX: 673, labelY: 375,
+    adjacency: ['iraportal', 'irastone', 'deepstone'],
+    development: 2, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#c8a25e',
+  },
+  iracoast: {
+    nationId: 'iravan', name: 'Iracoast',
+    points: '510,410 620,410 620,460 510,460',
+    labelX: 565, labelY: 435,
+    adjacency: ['iraportal', 'irastone', 'grimholt', 'ashbrook', 'dawncoast'],
+    development: 2, infraLevel: 1, deposit: 'copper', depositSlots: 2,
+    color: '#a8823e',
+  },
+  irastone: {
+    nationId: 'iravan', name: 'Irastone',
+    points: '620,410 724,410 720,460 620,460',
+    labelX: 671, labelY: 435,
+    adjacency: ['iraboreal', 'iracoast', 'dawncoast'],
+    development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#98723e',
+  },
+
+  // ---- DURENNA ----
+  greensward: {
+    nationId: 'durenna', name: 'Greensward',
+    points: '75,460 230,460 230,513 100,500 80,470',
+    labelX: 143, labelY: 485,
+    adjacency: ['midvale', 'ashpeak'],
+    development: 1, infraLevel: 1, deposit: 'timber', depositSlots: 2,
     color: '#6b8a5e',
   },
-  // Player empire — no `color` (uses province colors); no `adjacency` in NATIONS since player is not a nation
-  player: {
-    labelX: 393, labelY: 262,
-    capitalX: 393, capitalY: 248,
-    provinces: {
-      arvenmoor: { name: 'Arvenmoor', size: 'capital', points: '280,195 395,198 395,278 275,278', color: '#1a5898', labelX: 333, labelY: 240 },
-      caldrath:  { name: 'Caldrath',  size: 'medium',  points: '395,198 510,200 510,278 395,278', color: '#205ea8', labelX: 452, labelY: 240 },
-      thornhaven:{ name: 'Thornhaven',size: 'medium',  points: '275,278 395,278 390,358 270,360', color: '#184898', labelX: 326, labelY: 320 },
-      selmark:   { name: 'Selmark',   size: 'medium',  points: '395,278 510,278 510,355 390,358', color: '#2860b0', labelX: 450, labelY: 318 },
-    },
+  midvale: {
+    nationId: 'durenna', name: 'Midvale',
+    points: '230,460 400,460 400,520 250,515 230,513',
+    labelX: 310, labelY: 492,
+    adjacency: ['greensward', 'ashpeak', 'ashvale', 'ashbrook'],
+    development: 1, infraLevel: 1, deposit: 'copper', depositSlots: 2,
+    color: '#5b7a4e',
+  },
+  ashbrook: {
+    nationId: 'durenna', name: 'Ashbrook',
+    points: '400,460 580,460 580,505 550,510 400,520',
+    labelX: 490, labelY: 491,
+    adjacency: ['midvale', 'grimholt', 'iracoast', 'dawncoast'],
+    development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#7a9a6e',
+  },
+  dawncoast: {
+    nationId: 'durenna', name: 'Dawncoast',
+    points: '580,460 720,460 680,490 580,505',
+    labelX: 640, labelY: 479,
+    adjacency: ['ashbrook', 'iracoast', 'irastone'],
+    development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    color: '#5d7c50',
   },
 };

@@ -103,16 +103,22 @@ function initGame(empireName) {
 
     // AI nations — live state; static definitions are in NATIONS (data.js).
     // { [id]: { gdp, militaryLevel, relations, relationsNegPenalty, relationsFirstContact, relationsStreak, relationsBrokenRoutes } }
+    // GDP is initialised from province development (emergent); grows each turn via gdpGrowthRate.
     nations: Object.fromEntries(
-      Object.entries(NATIONS).map(([id, n]) => [id, {
-        gdp:                    n.gdp,
-        militaryLevel:          n.militaryLevel,
-        relations:              0,     // -100=hostile … +100=allied; starts at 0 (neutral); recomputed each turn
-        relationsNegPenalty:    0,     // accumulated from negotiation pushes/threats (negative; recovers slowly)
-        relationsFirstContact:  false, // one-time +5 bonus when first trade route is established
-        relationsStreak:        0,     // consecutive turns with an active trade route
-        relationsBrokenRoutes:  [],    // [{turn: N}] timestamps for decaying broken-route penalties
-      }])
+      Object.entries(NATIONS).map(([id, n]) => {
+        const initialGdp = Object.values(PROVINCES)
+          .filter(p => p.nationId === id)
+          .reduce((sum, p) => sum + p.development * GDP_PER_PROVINCE_DEVELOPMENT, 0);
+        return [id, {
+          gdp:                    initialGdp,
+          militaryLevel:          n.militaryLevel,
+          relations:              0,
+          relationsNegPenalty:    0,
+          relationsFirstContact:  false,
+          relationsStreak:        0,
+          relationsBrokenRoutes:  [],
+        }];
+      })
     ),
 
     // Active diplomatic deals — Phase 4.4

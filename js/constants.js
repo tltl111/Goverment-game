@@ -106,6 +106,11 @@ const TRADE_STRAIGHT_ACCEPT_BASE       = 0.05;  // 5% base chance
 const TRADE_STRAIGHT_ACCEPT_LEVERAGE   = 0.15;  // +15% per leverage point above 1.0
 const TRADE_STRAIGHT_ACCEPT_RELATIONS  = 0.005; // +0.5% per relations point above 0 (neutral)
 
+// Province map
+// Nation GDP = Σ(province.development) × GDP_PER_PROVINCE_DEVELOPMENT across all owned provinces.
+// Province development is static data (1–5); it represents structural economic capacity.
+const GDP_PER_PROVINCE_DEVELOPMENT = 100;   // $B GDP contributed per development level
+
 // Population
 const POPULATION_START            = 10;     // starting population (millions)
 const GDP_PER_CAPITA_START        = 500;    // starting GDP per capita (arbitrary index units)

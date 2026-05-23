@@ -457,14 +457,11 @@ function getMilitaryStrength() {
 
 // Resource Deposits (Phase 3.5) ============================================================
 
-// Deposit capacity per province based on its size.
-const REGION_CAPACITY_BY_SIZE = { small: 1, medium: 2, large: 3, capital: 4 };
-
-// Returns the max number of deposit slots for a province.
+// Returns the max number of deposit slots for a province (stored directly on the province).
 function getRegionCapacity(provinceId) {
-  const prov = MAP_REGIONS.player.provinces[provinceId];
+  const prov = PROVINCES[provinceId];
   if (!prov) return 0;
-  return REGION_CAPACITY_BY_SIZE[prov.size] || 2;
+  return prov.depositSlots || 2;
 }
 
 // Returns number of currently active deposits (all statuses) in a province.
@@ -472,11 +469,11 @@ function getRegionActiveDepositCount(provinceId) {
   return G.deposits.filter(d => d.regionId === provinceId).length;
 }
 
-// Returns list of province IDs that still have at least one free deposit slot.
+// Returns player province IDs that still have at least one free deposit slot.
 function getFreeSlotProvinces() {
-  return Object.keys(MAP_REGIONS.player.provinces).filter(id =>
-    getRegionActiveDepositCount(id) < getRegionCapacity(id)
-  );
+  return Object.keys(PROVINCES)
+    .filter(id => PROVINCES[id].nationId === 'player')
+    .filter(id => getRegionActiveDepositCount(id) < getRegionCapacity(id));
 }
 
 // Regional congestion multiplier: +20% development cost per other deposit in the same region.

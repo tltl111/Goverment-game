@@ -273,8 +273,8 @@ function cancelDepositUpgrade(depositId) {
 function _poolDeposit(dep) {
   const resType      = dep.resourceType;
   const output       = DEPOSIT_TIER_OUTPUT[dep.currentTier] || 0;
-  const provinceName = dep.regionId && MAP_REGIONS.player.provinces[dep.regionId]
-    ? MAP_REGIONS.player.provinces[dep.regionId].name
+  const provinceName = dep.regionId && PROVINCES[dep.regionId]
+    ? PROVINCES[dep.regionId].name
     : '';
   if (!G.establishedIndustries[resType]) {
     G.establishedIndustries[resType] = { sites: 0, totalOutput: 0 };
@@ -668,7 +668,7 @@ function endTurn() {
       if (Math.random() < chance) {
         // Assign to a random province that still has a free slot
         const provinceId = freeProvinces[Math.floor(Math.random() * freeProvinces.length)];
-        const provinceName = MAP_REGIONS.player.provinces[provinceId].name;
+        const provinceName = PROVINCES[provinceId]?.name ?? provinceId;
         // Pick a random max tier using weighted distribution
         const tiers = ['occurrence', 'vein', 'deposit', 'reserve', 'majorReserve'];
         const weights = DEPOSIT_MAX_TIER_WEIGHTS;

@@ -880,15 +880,17 @@ function renderResourcesTab() {
     </div>`;
 
   // --- Prospecting status + province capacity ---
-  const provinceRows = Object.entries(MAP_REGIONS.player.provinces).map(([provId, prov]) => {
+  const playerProvEntries = Object.entries(PROVINCES).filter(([, p]) => p.nationId === 'player');
+  const provinceRows = playerProvEntries.map(([provId, prov]) => {
     const used = getRegionActiveDepositCount(provId);
     const cap  = getRegionCapacity(provId);
     const full = used >= cap;
     const pips = Array.from({ length: cap }, (_, i) =>
       `<span class="res-slot-pip ${i < used ? 'used' : ''}"></span>`
     ).join('');
+    const isCapital = prov.depositSlots >= 4;
     return `<div class="res-stat-row">
-      <span class="res-stat-label">${prov.name}${prov.size === 'capital' ? ' ★' : ''}</span>
+      <span class="res-stat-label">${prov.name}${isCapital ? ' ★' : ''}</span>
       <span class="res-province-slots">${pips}</span>
       <span class="res-stat-value ${full ? 'res-slots-full' : ''}">${used}/${cap}</span>
     </div>`;
@@ -915,8 +917,8 @@ function renderResourcesTab() {
       const rt           = dep.resourceType ? RESOURCE_TYPES[dep.resourceType] : null;
       const icon         = rt ? rt.icon : '❓';
       const name         = rt ? rt.name : 'Unknown';
-      const provinceName = dep.regionId && MAP_REGIONS.player.provinces[dep.regionId]
-        ? MAP_REGIONS.player.provinces[dep.regionId].name : '';
+      const provinceName = dep.regionId && PROVINCES[dep.regionId]
+        ? PROVINCES[dep.regionId].name : '';
       const regionTag    = provinceName ? ` · <span class="res-region-tag">${provinceName}</span>` : '';
       const devCost      = getDepositDevelopCost(dep);
       const congestion   = dep.regionId ? getRegionCongestionMultiplier(dep) : 1;
@@ -1091,7 +1093,6 @@ function renderDiplomacy() {
 
   for (const [id, ns] of Object.entries(G.nations)) {
     const def      = NATIONS[id];
-    const reg      = MAP_REGIONS[id];
     const tier     = getRelationsTier(ns.relations);
     const route    = G.tradeRoutes.find(r => r.nationId === id);
     const matPct   = route ? Math.min(100, (route.maturity / TRADE_ROUTE_MATURITY_TURNS) * 100).toFixed(0) : 0;
@@ -1131,7 +1132,7 @@ function renderDiplomacy() {
 
     html += `
       <div class="diplo-nation-card">
-        <div class="diplo-nation-header" style="border-left:3px solid ${reg.color}">
+        <div class="diplo-nation-header" style="border-left:3px solid ${def.color}">
           <span class="diplo-nation-name">${def.name}</span>
           <span class="diplo-rel-badge ${tier.cssClass}">${ns.relations > 0 ? '+' : ''}${ns.relations} — ${tier.label}</span>
         </div>
@@ -1170,26 +1171,36 @@ function renderWorldMap() {
   // Ocean background (extends beyond viewBox to cover pan)
   svg += `<rect x="-200" y="-200" width="1200" height="960" fill="#0a1422"/>`;
 
-  // Nation regions
-  for (const [id, region] of Object.entries(MAP_REGIONS)) {
-    if (id === 'player') continue;
-    const ns = G.nations[id];
-    if (!ns) continue;
-    const sel    = _mapSelectedNation === id ? ' map-region-selected' : '';
+  // Build a per-nation province list for efficient rendering
+  const nationProvinces = {};
+  for (const [id, prov] of Object.entries(PROVINCES)) {
+    if (!nationProvinces[prov.nationId]) nationProvinces[prov.nationId] = [];
+    nationProvinces[prov.nationId].push({ id, ...prov });
+  }
+
+  // AI nation provinces — each province is its own polygon, all clickable for nation selection
+  for (const [nationId, provs] of Object.entries(nationProvinces)) {
+    if (nationId === 'player') continue;
+    const ns  = G.nations[nationId];
+    const def = NATIONS[nationId];
+    if (!ns || !def) continue;
+    const sel    = _mapSelectedNation === nationId ? ' map-region-selected' : '';
     const relCls = ns.relations >= 20 ? ' map-region-friendly' : ns.relations <= -20 ? ' map-region-hostile' : '';
-    svg += `<polygon class="map-region${relCls}${sel}" points="${region.points}" fill="${region.color}" onclick="selectMapNation('${id}')"/>`;
-    svg += `<text class="map-label" x="${region.labelX}" y="${region.labelY}">${NATIONS[id].name}</text>`;
-    svg += `<circle class="map-capital" cx="${region.capitalX}" cy="${region.capitalY}" r="3"/>`;
+    for (const prov of provs) {
+      svg += `<polygon class="map-region${relCls}${sel}" points="${prov.points}" fill="${prov.color}" onclick="selectMapNation('${nationId}')"/>`;
+    }
+    // Nation label and capital dot drawn once, centred in nation territory
+    svg += `<text class="map-label" x="${def.labelX}" y="${def.labelY}">${def.name}</text>`;
+    svg += `<circle class="map-capital" cx="${def.capitalX}" cy="${def.capitalY}" r="3"/>`;
   }
 
   // Player empire provinces
-  const pr = MAP_REGIONS.player;
-  for (const prov of Object.values(pr.provinces)) {
+  for (const prov of (nationProvinces['player'] || [])) {
     svg += `<polygon class="map-province" points="${prov.points}" fill="${prov.color}"/>`;
     svg += `<text class="map-province-label" x="${prov.labelX}" y="${prov.labelY}">${prov.name}</text>`;
   }
-  svg += `<text class="map-label map-player-label" x="${pr.labelX}" y="${pr.labelY}">${G.empire}</text>`;
-  svg += `<circle class="map-capital map-player-capital" cx="${pr.capitalX}" cy="${pr.capitalY}" r="4"/>`;
+  svg += `<text class="map-label map-player-label" x="${PLAYER_MAP.labelX}" y="${PLAYER_MAP.labelY}">${G.empire}</text>`;
+  svg += `<circle class="map-capital map-player-capital" cx="${PLAYER_MAP.capitalX}" cy="${PLAYER_MAP.capitalY}" r="4"/>`;
 
   // --- Info panel for selected nation ---
   let infoHtml = '';
@@ -1197,7 +1208,6 @@ function renderWorldMap() {
     const id   = _mapSelectedNation;
     const ns   = G.nations[id];
     const def  = NATIONS[id];
-    const reg  = MAP_REGIONS[id];
     const { label: relLabel, cssClass: relCls } = getRelationsTier(ns.relations);
     const borders  = (def.adjacency || []).map(a => a === 'player' ? G.empire : (NATIONS[a] ? NATIONS[a].name : a)).join(', ');
     const activeRoute   = G.tradeRoutes.find(r => r.nationId === id);
@@ -1241,7 +1251,7 @@ function renderWorldMap() {
 
     infoHtml = `
       <div class="map-info-panel">
-        <div class="map-info-nation" style="border-left:3px solid ${reg.color}">
+        <div class="map-info-nation" style="border-left:3px solid ${def.color}">
           <span class="map-info-name">${def.name}</span>
         </div>
         <div class="map-info-grid">

@@ -4,6 +4,29 @@ All notable changes to Government Simulator will be documented here.
 
 ---
 
+## [0.20.0] — Phase 5.0: Province Map Redesign
+
+### Added
+- **36-province world map** replacing the 8-polygon Phase 3.2 placeholder. Each province is an independent data entity with its own SVG polygon, adjacency list, development level (1–5), `infraLevel`, `deposit`, and `depositSlots`.
+- **`PROVINCES`** constant in `data.js` — flat object keyed by province ID. Province nations: Sorenia (3), Kethara (4), Marveth (4), Valdoria (4), Player (6), Orzhan (3), Nocthar (4), Iravan (4), Durenna (4).
+- **`PLAYER_MAP`** constant in `data.js` — stores player empire label and capital marker positions separately from individual provinces.
+- **`GDP_PER_PROVINCE_DEVELOPMENT = 100`** constant in `constants.js` — $100M GDP contributed per development level per province.
+- Two new player provinces: **Dawnford** and **Crestmere** (development 1, 2 deposit slots each), bringing the player's starting territory to 6 provinces.
+
+### Changed
+- **Emergent nation GDP** — nation GDP is no longer a hardcoded constant in `NATIONS`. It is now computed at game start from `Σ(province.development) × GDP_PER_PROVINCE_DEVELOPMENT` across all owned provinces, then grows each turn by the nation's `gdpGrowthRate`.
+- **`NATIONS`** entries updated: removed `gdp` field, added `color`, `labelX`, `labelY`, `capitalX`, `capitalY` for map rendering.
+- **`MAP_REGIONS`** constant removed — replaced by `PROVINCES` + `PLAYER_MAP`.
+- **`getRegionCapacity(provinceId)`** in `engine.js` now reads `PROVINCES[provinceId].depositSlots` directly; `REGION_CAPACITY_BY_SIZE` lookup removed.
+- **`getFreeSlotProvinces()`** in `engine.js` now filters `PROVINCES` by `nationId === 'player'`.
+- **`renderWorldMap()`** in `render.js` rewritten to iterate `PROVINCES` grouped by `nationId`. AI nations render all their province polygons then one label/capital dot; player provinces each get their own polygon and label.
+- Resources tab province rows and deposit province name lookups updated to use `PROVINCES` instead of `MAP_REGIONS.player.provinces`.
+- Diplomacy panel and map info panel nation colour now sourced from `NATIONS[id].color` instead of `MAP_REGIONS[id].color`.
+- Province deposit-slot capacity star indicator changed from `prov.size === 'capital'` to `prov.depositSlots >= 4`.
+- **Thornhaven** and **Selmark** polygon boundaries adjusted to accommodate the two new southern provinces.
+
+---
+
 ## [0.19.0] — Phase 4.4: Strategic Alliances, Cultural Diplomacy, UN Membership
 
 ### Added
