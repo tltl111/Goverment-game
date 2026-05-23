@@ -7,6 +7,7 @@ let _mapVB = { x: 0, y: 0, w: 800, h: 560 };
 let _mapDrag = null;        // { startClientX, startClientY, startVBX, startVBY, svgW, svgH }
 let _mapDragMoved = false;  // distinguishes drag from click
 let _mapSelectedNation = null;
+let _mapSelectedProvince = null;
 let _mapDocListenersAttached = false;
 
 // ============================================================
@@ -182,15 +183,28 @@ function renderAll() {
 
 // Update tab button locked/unlocked state based on current tech unlocks.
 function renderTabBar() {
-  const btn = document.getElementById('tab-btn-diplomacy');
-  if (!btn) return;
-  const hasTech = G.unlockedTechs.includes('diplomacyCorps');
-  if (hasTech) {
-    btn.classList.remove('tab-btn-locked');
-    btn.textContent = 'Diplomacy';
-  } else {
-    btn.classList.add('tab-btn-locked');
-    btn.textContent = '\uD83D\uDD12 Diplomacy';
+  const btnDiplomacy = document.getElementById('tab-btn-diplomacy');
+  if (btnDiplomacy) {
+    const hasDiplomacy = G.unlockedTechs.includes('diplomacyCorps');
+    if (hasDiplomacy) {
+      btnDiplomacy.classList.remove('tab-btn-locked');
+      btnDiplomacy.textContent = 'Diplomacy';
+    } else {
+      btnDiplomacy.classList.add('tab-btn-locked');
+      btnDiplomacy.textContent = '\uD83D\uDD12 Diplomacy';
+    }
+  }
+
+  const btnMilitary = document.getElementById('tab-btn-military');
+  if (btnMilitary) {
+    const hasMilitary = G.unlockedTechs.includes('standingArmy');
+    if (hasMilitary) {
+      btnMilitary.classList.remove('tab-btn-locked');
+      btnMilitary.textContent = 'Military';
+    } else {
+      btnMilitary.classList.add('tab-btn-locked');
+      btnMilitary.textContent = '\uD83D\uDD12 Military';
+    }
   }
 }
 
@@ -288,21 +302,39 @@ function renderPolicies() {
   }
 
   document.getElementById('policies-list').innerHTML = html;
+
+  // Installation maintenance summary card (shown if any installations exist)
+  const maintCost = getTotalInstallationMaintenance();
+  if (maintCost > 0) {
+    const count = G.installations.length;
+    document.getElementById('policies-list').innerHTML += `
+      <div class="policy-card active">
+        <div class="policy-header">
+          <span class="policy-icon">🏗️</span>
+          <span class="policy-name">Province Installations</span>
+          <span class="policy-cost">−${fmt(maintCost)}/turn</span>
+        </div>
+        <p class="policy-desc">${count} installation${count !== 1 ? 's' : ''} — fixed maintenance. Manage via the World Map.</p>
+      </div>`;
+  }
+
   updateBudgetProjection();
 }
 
 function buildEffectsHint(policyId) {
   const tags = {
-    infrastructure:  [['↑ Infra level', 'good'], ['↑ GDP growth', 'good'], ['↑ pop cap', 'good']],
+    infrastructure:  [['↑ Infra level', 'good'], ['↑ GDP growth', 'good'], ['↑ pop cap', 'good'], ['↑ supply delivery', 'good']],
     mining:          [['↑ Mining level', 'good'], ['↑ GDP growth', 'good']],
-    manufacturing:   [['↑ Mfg level', 'good'], ['↑ GDP growth', 'good'], ['capped by Mining', 'neutral']],
+    manufacturing:   [['↑ Mfg level', 'good'], ['↑ GDP growth', 'good'], ['↑ goods supply', 'good'], ['capped by Mining', 'neutral']],
     logistics:       [['↑ Logistics level', 'good'], ['↓ mfg import cost', 'good']],
     prospecting:     [['↑ Prospecting level', 'good'], ['↑ deposit chance/turn', 'good']],
     commerce:        [['↑ Commerce level', 'good'], ['↑ GDP growth', 'good'], ['amplified by Mfg', 'neutral']],
     finance:         [['↑ Finance level', 'good'], ['↓ debt cost', 'good']],
     healthcare:      [['↑ Healthcare level', 'good'], ['↑ pop growth', 'good'], ['↑ happiness', 'good']],
     education:       [['↑ Education level', 'good'], ['↑ GDP growth', 'good'], ['↑ research speed', 'good'], ['↑ happiness', 'good']],
-    military:        [['↑ Military level', 'good'], ['↓ happiness', 'bad']],
+    army:            [['↑ Army level', 'good'], ['↑ deterrence', 'good'], ['↑ leverage', 'good'], ['↓ happiness', 'bad'], ['pop-capped', 'neutral']],
+    navy:            [['↑ Navy level', 'good'], ['↑ deterrence', 'good'], ['protects trade', 'good']],
+    airForce:        [['↑ Air Force level', 'good'], ['↑ deterrence', 'good']],
     research:        [['↑ Research level', 'good'], ['↑ RP/turn', 'good'], ['↑ tech speed', 'good']],
   };
   return (tags[policyId] || [])
@@ -364,6 +396,7 @@ function renderDashboard() {
       { label: 'Infra Level',        value: Math.round(G.infraLevel) + '/100', unit: ' (' + infraDeltaStr + '/turn)', max: 100, rawPct: G.infraLevel, type: G.infraLevel < 20 ? 'neg' : G.infraLevel < 50 ? 'warn' : 'pos' },
       { label: 'Mining Level',         value: Math.round(G.miningLevel) + '/100',         unit: ' (GDP +' + (0.001 * G.miningLevel / 100 * 100).toFixed(2) + '%)',                                                                                                            max: 100, rawPct: G.miningLevel,         type: G.miningLevel < 20 ? 'neg' : G.miningLevel < 50 ? 'warn' : 'pos' },
       { label: 'Manufacturing Level',  value: Math.round(G.manufacturingLevel) + '/100',  unit: (() => { const eff = Math.min(G.manufacturingLevel, G.miningLevel); return ' (GDP +' + (0.002 * eff / 100 * 100).toFixed(2) + '%)' + (G.manufacturingLevel > G.miningLevel ? ' \u26a0 Mining' : ''); })(), max: 100, rawPct: G.manufacturingLevel,  type: G.manufacturingLevel < 20 ? 'neg' : G.manufacturingLevel < 50 ? 'warn' : 'pos' },
+      { label: 'Goods Supply',          value: Math.round(getSupplyRatio() * 100) + '%',   unit: ' (' + getGoodsDelivered().toFixed(0) + ' delivered / ' + getTotalGoodsDemand().toFixed(0) + ' demanded)', max: 100, rawPct: getSupplyRatio() * 100, type: getSupplyRatio() >= 0.9 ? 'pos' : getSupplyRatio() >= 0.7 ? 'warn' : 'neg' },
       { label: 'Commerce Level',       value: Math.round(G.commerceLevel) + '/100',       unit: ' (GDP +' + (0.002 * (G.commerceLevel / 100) * (0.5 + 0.5 * Math.min(G.manufacturingLevel, G.miningLevel) / 100) * 100).toFixed(2) + '%)', max: 100, rawPct: G.commerceLevel,       type: G.commerceLevel < 20 ? 'neg' : G.commerceLevel < 50 ? 'warn' : 'pos' },
       { label: 'Finance Level',     value: Math.round(G.financeLevel) + '/100', unit: ' (↓ debt cost)', max: 100, rawPct: G.financeLevel, type: G.financeLevel < 20 ? 'neg' : G.financeLevel < 50 ? 'warn' : 'pos' },
       { label: 'Healthcare Level',   value: Math.round(G.healthcareLevel) + '/100', unit: ' (pop growth +' + (POP_GROWTH_HEALTHCARE_SCALE * G.healthcareLevel / 100 * 100).toFixed(2) + '%/turn)', max: 100, rawPct: G.healthcareLevel, type: G.healthcareLevel < 20 ? 'neg' : G.healthcareLevel < 50 ? 'warn' : 'pos' },
@@ -373,7 +406,10 @@ function renderDashboard() {
       { label: 'Research Level',   value: G.researchLevel.toFixed(1) + ' / ' + getResearchCapacityCeiling(), unit: '', max: 100, rawPct: Math.min(100, (G.researchLevel / getResearchCapacityCeiling()) * 100), type: G.researchLevel === 0 ? 'warn' : 'pos' },
       { label: 'Research Output',   value: '+' + rp.toFixed(1),      unit: ' RP/turn', max: 100, rawPct: Math.min(100, rp * 3), type: rp === 0 ? 'warn' : 'pos' },
       { label: 'Active Research',   value: activeResearchName, unit: '', max: 100, rawPct: activeResearchPct, type: G.activeResearch ? 'pos' : 'warn' },
-      { label: 'Military Level',    value: Math.round(G.militaryLevel) + '/100', unit: ' (strength ' + Math.round(getMilitaryStrength()) + ' / ' + Math.round(G.population * MILITARY_MANPOWER_RATIO) + ' cap)', max: 100, rawPct: G.militaryLevel, type: G.militaryLevel === 0 ? 'warn' : 'pos' },
+      { label: 'Deterrence Rating', value: getDeterrenceRating().toFixed(0) + '/100', unit: ' (strength ' + Math.round(getTotalMilitaryStrength()) + ')', max: 100, rawPct: getDeterrenceRating(), type: getDeterrenceRating() === 0 ? 'warn' : 'pos' },
+      { label: 'Army Level',        value: Math.round(G.armyLevel) + '/100', unit: ' (manpower cap ' + Math.round(G.population * MILITARY_MANPOWER_RATIO) + ')', max: 100, rawPct: G.armyLevel, type: G.armyLevel === 0 ? 'warn' : 'pos' },
+      { label: 'Navy Level',        value: Math.round(G.navyLevel) + '/100', unit: '', max: 100, rawPct: G.navyLevel, type: G.navyLevel === 0 ? 'warn' : 'pos' },
+      { label: 'Air Force Level',   value: Math.round(G.airForceLevel) + '/100', unit: '', max: 100, rawPct: G.airForceLevel, type: G.airForceLevel === 0 ? 'warn' : 'pos' },
     ];
 
     const barClass = t => t === 'neg' ? 'bar-red' : t === 'warn' ? 'bar-yellow' : 'bar-green';
@@ -483,6 +519,10 @@ function renderDashboard() {
     renderDiplomacy();
   }
 
+  if (tab === 'military') {
+    renderMilitary();
+  }
+
   if (tab === 'statistics') {
     const h = G.history;
     const noData = h.length === 0;
@@ -526,8 +566,10 @@ function renderDashboard() {
       { label: 'Finance',        key: 'financeLevel',        color: 'var(--green)',  fmt: v => v.toFixed(1) + '/100' },
       { label: 'Healthcare',     key: 'healthcareLevel',     color: 'var(--red)',    fmt: v => v.toFixed(1) + '/100' },
       { label: 'Education',      key: 'educationLevel',      color: 'var(--blue)',   fmt: v => v.toFixed(1) + '/100' },
-      { label: 'Military',       key: 'militaryLevel',       color: 'var(--orange)', fmt: v => v.toFixed(1) + '/100' },
-      { label: 'Research',       key: 'researchLevel',       color: 'var(--teal)',   fmt: v => v.toFixed(1) + '/' + getResearchCapacityCeiling() },
+      { label: 'Army',           key: 'armyLevel',            color: 'var(--orange)', fmt: v => v.toFixed(1) + '/100' },
+      { label: 'Navy',           key: 'navyLevel',            color: 'var(--teal)',   fmt: v => v.toFixed(1) + '/100' },
+      { label: 'Air Force',      key: 'airForceLevel',        color: 'var(--blue)',   fmt: v => v.toFixed(1) + '/100' },
+      { label: 'Research',       key: 'researchLevel',        color: 'var(--teal)',   fmt: v => v.toFixed(1) + '/' + getResearchCapacityCeiling() },
     ];
     let sectorRows = '';
     for (const sec of sectors) {
@@ -1067,6 +1109,195 @@ function renderResourcesTab() {
 }
 
 // ============================================================
+// MILITARY SCREEN (Phase 5.1)
+// ============================================================
+
+function renderMilitary() {
+  const el = document.getElementById('tab-military');
+  if (!el) return;
+
+  if (!G.unlockedTechs.includes('standingArmy')) {
+    el.innerHTML = `
+      <div class="diplo-locked">
+        <div class="diplo-locked-icon">⚔️</div>
+        <div class="diplo-locked-title">Standing Army</div>
+        <div class="diplo-locked-msg">Research <strong>Standing Army</strong> to unlock the Military screen.</div>
+      </div>`;
+    return;
+  }
+
+  const armyUnlocked     = G.unlockedTechs.includes('standingArmy');
+  const navyUnlocked     = G.unlockedTechs.includes('navalFleet');
+  const airForceUnlocked = G.unlockedTechs.includes('airForceEstablishment');
+
+  const deterrence       = getDeterrenceRating();
+  const armyStr          = getArmyStrength();
+  const navyStr          = getNavyStrength();
+  const airStr           = getAirForceStrength();
+  const totalStr         = getTotalMilitaryStrength();
+  const manpowerCap      = G.population * MILITARY_MANPOWER_RATIO;
+  const manpowerPct      = Math.min(100, (G.armyLevel / 100 * ARMY_STRENGTH_MAX / manpowerCap) * 100);
+  const manpowerLimited  = (ARMY_STRENGTH_MAX * (G.armyLevel / 100)) > manpowerCap;
+
+  const goodsProduced  = getGoodsProduced();
+  const deliveryEff    = getGoodsDeliveryEff();
+  const goodsDelivered = getGoodsDelivered();
+  const civDemand      = getCivilianGoodsDemand();
+  const milDemand      = getMilitaryGoodsDemand();
+  const supplyRatio    = getSupplyRatio();
+  const supplyPenalty  = getSupplyHappinessPenalty();
+  const supplyPct      = Math.round(supplyRatio * 100);
+  const supplyClass    = supplyRatio >= 0.9 ? 'stat-pos' : supplyRatio >= 0.7 ? 'effect-neutral' : 'stat-neg';
+  const supplyNote     = supplyRatio < 1
+    ? `⚠️ Deficit — army effectiveness ${supplyPct}%, happiness −${supplyPenalty.toFixed(1)}`
+    : `✓ Supply sufficient — army fully provisioned`;
+
+  function branchCard(name, icon, level, strength, maxStrength, unlocked, requiresTechName, fundingKey) {
+    if (!unlocked) {
+      return `<div class="mil-branch-card mil-branch-locked">
+        <div class="mil-branch-header">
+          <span class="mil-branch-icon">${icon}</span>
+          <span class="mil-branch-name">${name}</span>
+          <span class="mil-branch-status locked">🔒 Locked</span>
+        </div>
+        <div class="mil-branch-locked-msg">Research <strong>${requiresTechName}</strong> to unlock.</div>
+      </div>`;
+    }
+    const funding   = G.policyFunding[fundingKey] || 0;
+    const costM     = getEffectivePolicyCost(fundingKey);
+    const levelPct  = level.toFixed(1);
+    const strPct    = (strength / maxStrength * 100).toFixed(0);
+    const fmtCost   = funding > 0 ? '−' + fmt(costM) + '/turn' : 'Inactive';
+    return `<div class="mil-branch-card">
+      <div class="mil-branch-header">
+        <span class="mil-branch-icon">${icon}</span>
+        <span class="mil-branch-name">${name}</span>
+        <span class="mil-branch-status ${funding > 0 ? 'active' : 'inactive'}">${funding > 0 ? 'Funded' : 'Unfunded'}</span>
+      </div>
+      <div class="mil-branch-stats">
+        <div class="mil-stat-row">
+          <span class="mil-stat-label">Level</span>
+          <span class="mil-stat-value">${levelPct} / 100</span>
+        </div>
+        <div class="mil-bar-bg"><div class="mil-bar-fill" style="width:${levelPct}%"></div></div>
+        <div class="mil-stat-row">
+          <span class="mil-stat-label">Strength</span>
+          <span class="mil-stat-value">${strength.toFixed(1)} / ${maxStrength}</span>
+        </div>
+        <div class="mil-stat-row">
+          <span class="mil-stat-label">Funding</span>
+          <span class="mil-stat-value ${funding > 0 ? '' : 'stat-neg'}">${funding}% of income — ${fmtCost}</span>
+        </div>
+      </div>
+      <div class="mil-branch-hint">Adjust funding via the <strong>Security</strong> tab in the Policy panel.</div>
+    </div>`;
+  }
+
+  const armyCard = branchCard(
+    'Army', '⚔️', G.armyLevel, armyStr, ARMY_STRENGTH_MAX,
+    armyUnlocked, 'Standing Army', 'army'
+  );
+  const navyCard = branchCard(
+    'Navy', '⚓', G.navyLevel, navyStr, NAVY_STRENGTH_MAX,
+    navyUnlocked, 'Naval Fleet', 'navy'
+  );
+  const airCard  = branchCard(
+    'Air Force', '✈️', G.airForceLevel, airStr, AIRFORCE_STRENGTH_MAX,
+    airForceUnlocked, 'Air Force', 'airForce'
+  );
+
+  const deterClass = deterrence >= 60 ? 'stat-pos' : deterrence >= 30 ? 'effect-neutral' : 'stat-neg';
+  const manpowerNote = manpowerLimited
+    ? `<span class="stat-neg"> (manpower-limited — grow population to raise Army strength beyond ${manpowerCap.toFixed(0)})</span>`
+    : '';
+
+  el.innerHTML = `
+    <div class="mil-panel">
+      <div class="mil-panel-header">
+        <span class="mil-panel-title">⚔️ Military</span>
+        <span class="mil-deterrence-badge ${deterClass}">Deterrence: ${deterrence.toFixed(0)}/100</span>
+      </div>
+      <div class="mil-deterrence-row">
+        <div class="mil-stat-row">
+          <span class="mil-stat-label">Combined Strength</span>
+          <span class="mil-stat-value">${totalStr.toFixed(1)} / ${ARMY_STRENGTH_MAX + NAVY_STRENGTH_MAX + AIRFORCE_STRENGTH_MAX}</span>
+        </div>
+        <div class="mil-bar-bg"><div class="mil-bar-fill mil-bar-deterrence" style="width:${deterrence.toFixed(0)}%"></div></div>
+        <div class="mil-deterrence-hint">Deterrence = Army 50% + Navy 25% + Air Force 25%${manpowerNote}</div>
+      </div>
+      <div class="mil-supply-section">
+        <div class="mil-panel-header">
+          <span class="mil-panel-title">📦 Goods Supply</span>
+          <span class="mil-deterrence-badge ${supplyClass}">${supplyPct}% supplied</span>
+        </div>
+        <div class="mil-stat-row">
+          <span class="mil-stat-label">Produced</span>
+          <span class="mil-stat-value">${goodsProduced.toFixed(1)} units/turn (Mfg ${Math.round(G.manufacturingLevel)})</span>
+        </div>
+        <div class="mil-stat-row">
+          <span class="mil-stat-label">Delivery</span>
+          <span class="mil-stat-value">${Math.round(deliveryEff * 100)}% efficiency → ${goodsDelivered.toFixed(1)} delivered (Infra ${Math.round(G.infraLevel)})</span>
+        </div>
+        <div class="mil-stat-row">
+          <span class="mil-stat-label">Civilian demand</span>
+          <span class="mil-stat-value">${civDemand.toFixed(1)} units/turn (${fmtPop(G.population)})</span>
+        </div>
+        <div class="mil-stat-row">
+          <span class="mil-stat-label">Military demand</span>
+          <span class="mil-stat-value">${milDemand.toFixed(1)} units/turn (Army strength ${armyStr.toFixed(1)})</span>
+        </div>
+        <div class="mil-bar-bg"><div class="mil-bar-fill mil-bar-supply" style="width:${Math.min(100, supplyPct)}%"></div></div>
+        <div class="mil-supply-note ${supplyClass}">${supplyNote}</div>
+      </div>
+      ${_buildInstallationsSection()}
+      <div class="mil-branches">
+        ${armyCard}
+        ${navyCard}
+        ${airCard}
+      </div>
+    </div>`;
+}
+
+function _buildInstallationsSection() {
+  const totalMaint = getTotalInstallationMaintenance();
+  const badge = G.installations.length > 0
+    ? `${G.installations.length} built — −${fmt(totalMaint)}/turn`
+    : 'None built';
+  const badgeCls = G.installations.length > 0 ? 'effect-neutral' : '';
+
+  let listHtml = '';
+  if (G.installations.length === 0) {
+    listHtml = '<div class="mil-supply-note">No installations — click a player province on the World Map to build.</div>';
+  } else {
+    // Group by province
+    const byProvince = {};
+    for (const inst of G.installations) {
+      if (!byProvince[inst.provinceId]) byProvince[inst.provinceId] = [];
+      byProvince[inst.provinceId].push(inst);
+    }
+    for (const [provId, insts] of Object.entries(byProvince)) {
+      const provName = PROVINCES[provId]?.name || provId;
+      const icons = insts.map(i => INSTALLATION_TYPES[i.type]?.icon + ' ' + INSTALLATION_TYPES[i.type]?.name).join(', ');
+      const maintHere = insts.reduce((s, i) => s + (INSTALLATION_TYPES[i.type]?.maintenance || 0), 0);
+      listHtml += `<div class="mil-install-row">
+        <span class="mil-install-province">${provName}</span>
+        <span class="mil-install-types">${icons}</span>
+        <span class="mil-install-cost stat-neg">−${fmt(maintHere)}/turn</span>
+      </div>`;
+    }
+  }
+
+  return `
+    <div class="mil-installations-section">
+      <div class="mil-panel-header">
+        <span class="mil-panel-title">🏗️ Province Installations</span>
+        <span class="mil-deterrence-badge ${badgeCls}">${badge}</span>
+      </div>
+      ${listHtml}
+    </div>`;
+}
+
+// ============================================================
 // WORLD MAP
 // ============================================================
 
@@ -1171,6 +1402,12 @@ function renderWorldMap() {
   // Ocean background (extends beyond viewBox to cover pan)
   svg += `<rect x="-200" y="-200" width="1200" height="960" fill="#0a1422"/>`;
 
+  // Named sea regions (drawn above background, below land provinces)
+  for (const [id, sea] of Object.entries(SEA_PROVINCES)) {
+    svg += `<polygon class="map-sea-region" points="${sea.points}" fill="${sea.color}"/>`;
+    svg += `<text class="map-sea-label" x="${sea.labelX}" y="${sea.labelY}">${sea.name}</text>`;
+  }
+
   // Build a per-nation province list for efficient rendering
   const nationProvinces = {};
   for (const [id, prov] of Object.entries(PROVINCES)) {
@@ -1196,15 +1433,24 @@ function renderWorldMap() {
 
   // Player empire provinces
   for (const prov of (nationProvinces['player'] || [])) {
-    svg += `<polygon class="map-province" points="${prov.points}" fill="${prov.color}"/>`;
+    const selCls = _mapSelectedProvince === prov.id ? ' map-province-selected' : '';
+    svg += `<polygon class="map-province${selCls}" points="${prov.points}" fill="${prov.color}" onclick="selectMapProvince('${prov.id}')"/>`;
     svg += `<text class="map-province-label" x="${prov.labelX}" y="${prov.labelY}">${prov.name}</text>`;
+    // Show installation icons in province
+    const provInstalls = getInstallationsInProvince(prov.id);
+    if (provInstalls.length > 0) {
+      const icons = provInstalls.map(i => INSTALLATION_TYPES[i.type]?.icon || '').join('');
+      svg += `<text class="map-install-icons" x="${prov.labelX}" y="${prov.labelY + 12}">${icons}</text>`;
+    }
   }
   svg += `<text class="map-label map-player-label" x="${PLAYER_MAP.labelX}" y="${PLAYER_MAP.labelY}">${G.empire}</text>`;
   svg += `<circle class="map-capital map-player-capital" cx="${PLAYER_MAP.capitalX}" cy="${PLAYER_MAP.capitalY}" r="4"/>`;
 
-  // --- Info panel for selected nation ---
+  // --- Info panel for selected nation OR selected player province ---
   let infoHtml = '';
-  if (_mapSelectedNation && G.nations[_mapSelectedNation]) {
+  if (_mapSelectedProvince && PROVINCES[_mapSelectedProvince]?.nationId === 'player') {
+    infoHtml = _buildProvincePanel(_mapSelectedProvince);
+  } else if (_mapSelectedNation && G.nations[_mapSelectedNation]) {
     const id   = _mapSelectedNation;
     const ns   = G.nations[id];
     const def  = NATIONS[id];
@@ -1280,7 +1526,64 @@ function renderWorldMap() {
 function selectMapNation(id) {
   if (_mapDragMoved) return;
   _mapSelectedNation = (_mapSelectedNation === id) ? null : id;
+  _mapSelectedProvince = null;
   renderWorldMap();
+}
+
+function selectMapProvince(id) {
+  if (_mapDragMoved) return;
+  _mapSelectedProvince = (_mapSelectedProvince === id) ? null : id;
+  _mapSelectedNation = null;
+  renderWorldMap();
+}
+
+function _buildProvincePanel(provinceId) {
+  const prov = PROVINCES[provinceId];
+  if (!prov) return '';
+
+  const existing = getInstallationsInProvince(provinceId);
+  let existingHtml = '';
+  if (existing.length > 0) {
+    existingHtml = '<div class="prov-install-label">Built installations:</div>';
+    const counts = {};
+    for (const inst of existing) counts[inst.type] = (counts[inst.type] || 0) + 1;
+    for (const [type, count] of Object.entries(counts)) {
+      const def = INSTALLATION_TYPES[type];
+      existingHtml += `<div class="prov-install-item">${def.icon} ${def.name} ×${count} — −${fmt(def.maintenance * count)}/turn</div>`;
+    }
+  } else {
+    existingHtml = '<div class="prov-install-label stat-dim">No installations built.</div>';
+  }
+
+  let buildHtml = '<div class="prov-install-label">Build:</div>';
+  for (const [type, def] of Object.entries(INSTALLATION_TYPES)) {
+    const cost = getInstallationBuildCost(type, provinceId);
+    const canAfford = G.treasury >= cost;
+    const needsCoastal = def.requiresCoastal && !prov.coastal;
+    const disabled = !canAfford || needsCoastal;
+    const disabledAttr = disabled ? 'disabled' : '';
+    const hint = needsCoastal ? ' (coastal only)' : (!canAfford ? ' (need ' + fmt(cost) + 'M)' : '');
+    buildHtml += `<button class="btn btn-sm prov-install-btn" onclick="buildInstallation('${type}','${provinceId}')" ${disabledAttr}>
+      ${def.icon} ${def.name} — ${fmt(cost)}M${hint}
+    </button>`;
+  }
+
+  return `
+    <div class="map-info-panel">
+      <div class="map-info-nation">
+        <span class="map-info-name">${prov.name}</span>
+        <span class="map-province-badge">Dev ${prov.development}/5</span>
+      </div>
+      <div class="map-info-grid">
+        <div class="map-info-item"><div class="map-info-label">Infra</div><div class="map-info-val">${prov.infraLevel}/3</div></div>
+        <div class="map-info-item"><div class="map-info-label">Coastal</div><div class="map-info-val">${prov.coastal ? '✓ Yes' : '✗ No'}</div></div>
+      </div>
+      <div class="prov-install-section">
+        ${existingHtml}
+        <div class="prov-install-divider"></div>
+        ${buildHtml}
+      </div>
+    </div>`;
 }
 
 function initMapInteraction() {

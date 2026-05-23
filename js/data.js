@@ -79,13 +79,34 @@ const POLICIES = {
     maxFunding: 20,
     effects: {}
   },
-  military: {
-    id: 'military',
-    name: 'Military',
+  army: {
+    id: 'army',
+    name: 'Army',
     category: 'security',
     icon: '⚔️',
-    description: 'Fund armed forces. Builds Military level, increasing national defence strength. High military levels have a small happiness cost.',
+    description: 'Fund ground forces. Builds Army level, increasing deterrence and negotiation leverage. Army strength is soft-capped by population (manpower). High Army levels have a small happiness cost.',
     maxFunding: 20,
+    requiresTech: 'standingArmy',
+    effects: {}
+  },
+  navy: {
+    id: 'navy',
+    name: 'Navy',
+    category: 'security',
+    icon: '⚓',
+    description: 'Fund naval forces. Builds Navy level, contributing to deterrence and protecting trade routes at sea.',
+    maxFunding: 20,
+    requiresTech: 'navalFleet',
+    effects: {}
+  },
+  airForce: {
+    id: 'airForce',
+    name: 'Air Force',
+    category: 'security',
+    icon: '✈️',
+    description: 'Fund air forces. Builds Air Force level, contributing to deterrence. Requires advanced manufacturing capability.',
+    maxFunding: 20,
+    requiresTech: 'airForceEstablishment',
     effects: {}
   },
   research: {
@@ -443,6 +464,36 @@ const TECHNOLOGIES = {
     requires: ['strategicAlliances'],
     unlocks: null,
     effects: { unRelationsBonus: 5, effectDesc: '+5 relations with all nations globally' }
+  },
+
+  // ============================================================
+  // MILITARY PATH (Phase 5.1)
+  // Each tech unlocks one branch of the military. Branches are funded
+  // independently in the policy panel and contribute weighted to deterrence.
+  // ============================================================
+  standingArmy: {
+    id: 'standingArmy', name: 'Standing Army',
+    tier: 1, path: 'military', cost: 30, icon: '⚔️',
+    description: 'Establish a professional standing army. Unlocks the Army policy and the Military screen.',
+    requires: [],
+    unlocks: { policies: ['army'] },
+    effects: { effectDesc: 'Unlocks Army policy + Military screen' }
+  },
+  navalFleet: {
+    id: 'navalFleet', name: 'Naval Fleet',
+    tier: 2, path: 'military', cost: 80, icon: '⚓',
+    description: 'Commission a standing naval fleet. Unlocks the Navy policy.',
+    requires: ['standingArmy'],
+    unlocks: { policies: ['navy'] },
+    effects: { effectDesc: 'Unlocks Navy policy' }
+  },
+  airForceEstablishment: {
+    id: 'airForceEstablishment', name: 'Air Force',
+    tier: 3, path: 'military', cost: 160, icon: '✈️',
+    description: 'Establish an air force branch. Requires mass production capability. Unlocks the Air Force policy.',
+    requires: ['navalFleet', 'massProduction'],
+    unlocks: { policies: ['airForce'] },
+    effects: { effectDesc: 'Unlocks Air Force policy' }
   },};
 
 // ============================================================
@@ -704,6 +755,7 @@ const PROVINCES = {
     labelX: 177, labelY: 83,
     adjacency: ['stormfen', 'redfen', 'aldenmere', 'veldmoor'],
     development: 2, infraLevel: 2, deposit: 'copper', depositSlots: 2,
+    coastal: true,
     color: '#5a7da8',
   },
   stormfen: {
@@ -712,6 +764,7 @@ const PROVINCES = {
     labelX: 125, labelY: 163,
     adjacency: ['venmoor', 'redfen', 'greenvale'],
     development: 1, infraLevel: 1, deposit: 'silicon', depositSlots: 2,
+    coastal: true,
     color: '#4e6e96',
   },
   redfen: {
@@ -730,6 +783,7 @@ const PROVINCES = {
     labelX: 338, labelY: 71,
     adjacency: ['ironspire', 'veldmoor', 'venmoor'],
     development: 4, infraLevel: 3, deposit: 'chemicals', depositSlots: 2,
+    coastal: true,
     color: '#d4996a',
   },
   ironspire: {
@@ -738,6 +792,7 @@ const PROVINCES = {
     labelX: 453, labelY: 71,
     adjacency: ['aldenmere', 'kestwall', 'havenport'],
     development: 3, infraLevel: 2, deposit: null, depositSlots: 2,
+    coastal: true,
     color: '#c4884a',
   },
   veldmoor: {
@@ -764,6 +819,7 @@ const PROVINCES = {
     labelX: 568, labelY: 94,
     adjacency: ['marport', 'silverwatch', 'ironspire', 'kestwall'],
     development: 2, infraLevel: 2, deposit: 'chemicals', depositSlots: 2,
+    coastal: true,
     color: '#7a6b9e',
   },
   marport: {
@@ -772,6 +828,7 @@ const PROVINCES = {
     labelX: 671, labelY: 101,
     adjacency: ['havenport', 'silverwatch'],
     development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    coastal: true,
     color: '#6b5c8e',
   },
   silverwatch: {
@@ -780,6 +837,7 @@ const PROVINCES = {
     labelX: 622, labelY: 210,
     adjacency: ['havenport', 'marport', 'deepstone', 'kestwall', 'caldrath'],
     development: 1, infraLevel: 1, deposit: 'silicon', depositSlots: 2,
+    coastal: true,
     color: '#8a7aae',
   },
   deepstone: {
@@ -788,6 +846,7 @@ const PROVINCES = {
     labelX: 622, labelY: 306,
     adjacency: ['silverwatch', 'selmark', 'crestmere', 'iraportal', 'iraboreal'],
     development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    coastal: true,
     color: '#6a5b8e',
   },
 
@@ -798,6 +857,7 @@ const PROVINCES = {
     labelX: 125, labelY: 240,
     adjacency: ['ironfields', 'ashwood', 'stormfen'],
     development: 2, infraLevel: 2, deposit: 'timber', depositSlots: 2,
+    coastal: true,
     color: '#5e9c76',
   },
   ironfields: {
@@ -814,6 +874,7 @@ const PROVINCES = {
     labelX: 125, labelY: 320,
     adjacency: ['greenvale', 'duskholm', 'gorrath'],
     development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    coastal: true,
     color: '#4e8c66',
   },
   duskholm: {
@@ -882,6 +943,7 @@ const PROVINCES = {
     labelX: 125, labelY: 385,
     adjacency: ['ironhold', 'ashpeak', 'ashwood'],
     development: 2, infraLevel: 1, deposit: null, depositSlots: 2,
+    coastal: true,
     color: '#8a4a4a',
   },
   ironhold: {
@@ -898,6 +960,7 @@ const PROVINCES = {
     labelX: 173, labelY: 435,
     adjacency: ['gorrath', 'ironhold', 'greensward', 'midvale', 'ashvale'],
     development: 1, infraLevel: 1, deposit: 'coal', depositSlots: 2,
+    coastal: true,
     color: '#7a3a3a',
   },
 
@@ -950,6 +1013,7 @@ const PROVINCES = {
     labelX: 673, labelY: 375,
     adjacency: ['iraportal', 'irastone', 'deepstone'],
     development: 2, infraLevel: 1, deposit: null, depositSlots: 2,
+    coastal: true,
     color: '#c8a25e',
   },
   iracoast: {
@@ -966,6 +1030,7 @@ const PROVINCES = {
     labelX: 671, labelY: 435,
     adjacency: ['iraboreal', 'iracoast', 'dawncoast'],
     development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    coastal: true,
     color: '#98723e',
   },
 
@@ -976,6 +1041,7 @@ const PROVINCES = {
     labelX: 143, labelY: 485,
     adjacency: ['midvale', 'ashpeak'],
     development: 1, infraLevel: 1, deposit: 'timber', depositSlots: 2,
+    coastal: true,
     color: '#6b8a5e',
   },
   midvale: {
@@ -984,6 +1050,7 @@ const PROVINCES = {
     labelX: 310, labelY: 492,
     adjacency: ['greensward', 'ashpeak', 'ashvale', 'ashbrook'],
     development: 1, infraLevel: 1, deposit: 'copper', depositSlots: 2,
+    coastal: true,
     color: '#5b7a4e',
   },
   ashbrook: {
@@ -992,6 +1059,7 @@ const PROVINCES = {
     labelX: 490, labelY: 491,
     adjacency: ['midvale', 'grimholt', 'iracoast', 'dawncoast'],
     development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    coastal: true,
     color: '#7a9a6e',
   },
   dawncoast: {
@@ -1000,6 +1068,27 @@ const PROVINCES = {
     labelX: 640, labelY: 479,
     adjacency: ['ashbrook', 'iracoast', 'irastone'],
     development: 1, infraLevel: 1, deposit: null, depositSlots: 2,
+    coastal: true,
     color: '#5d7c50',
+  },
+};
+
+// Named sea regions — drawn below land provinces on the world map.
+// Each sea region borders the coastal provinces of the surrounding nations.
+const SEA_PROVINCES = {
+  vaelSea: {
+    name: 'Vael Sea',
+    // Wraps the north coast, east coast, and west strip of the continent.
+    // Coastline traced from the outer edges of all bordering land provinces.
+    points: '0,0 800,0 800,460 720,460 724,410 730,330 735,270 740,200 734,150 730,110 640,50 625,47 510,28 395,29 280,30 160,40 90,70 75,130 75,200 75,280 75,360 75,410 75,460 0,460',
+    labelX: 680, labelY: 25,
+    color: '#1a3f6a',
+  },
+  greyReach: {
+    name: 'Grey Reach',
+    // South sea below Durenna and the lower Iravan coast.
+    points: '0,460 75,460 80,470 100,500 230,513 250,515 400,520 550,510 580,505 680,490 720,460 800,460 800,560 0,560',
+    labelX: 400, labelY: 545,
+    color: '#1a3f6a',
   },
 };

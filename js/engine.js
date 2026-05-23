@@ -118,7 +118,7 @@ function getTotalNetIncome() {
   const pe = getProjectEffects();
   const interestRate = G.treasury < 0 ? getDebtInterestRate() : getSavingsInterestRate();
   const interest = G.treasury * interestRate;
-  return getNetIncome() - getProjectFundingTotal() + getTotalTradeIncome() + interest + pe.passiveIncome;
+  return getNetIncome() - getProjectFundingTotal() + getTotalTradeIncome() + interest + pe.passiveIncome - getTotalInstallationMaintenance();
 }
 
 // Effects from completed projects — research, infra, trade, and GDP bonuses.
@@ -214,7 +214,8 @@ function calcHappinessTarget() {
   // Social policy levels contribute happiness based on accumulated investment
   h += HEALTHCARE_HAPPINESS_MAX * (G.healthcareLevel / 100);
   h += EDUCATION_HAPPINESS_MAX  * (G.educationLevel  / 100);
-  h -= MILITARY_HAPPINESS_PENALTY * (G.militaryLevel / 100);
+  h -= ARMY_HAPPINESS_PENALTY * (G.armyLevel / 100);
+  h -= getSupplyHappinessPenalty();
   // Tax: 0% gives +15 happiness, 15% neutral, higher = penalty
   h -= Math.round((G.taxRate - 0.15) * 100);
   h += getTechEffects().happinessBonus;
@@ -247,12 +248,12 @@ function getRpPerTurn() {
 }
 
 // Leverage of the player over a nation during negotiation.
-// leverage = clamp(militaryLevel / nationMilitaryLevel × relations/50, 0.1, 3.0)
+// leverage = clamp(deterrenceRating / nationMilitaryLevel × relations/50, 0.1, 3.0)
 // A nation with no military (level 0) is treated as level 1 to avoid division by zero.
 function getTradeNegotiationLeverage(nationId) {
   const ns  = G.nations[nationId];
   const def = NATIONS[nationId];
-  const milRatio = G.militaryLevel / Math.max(1, def.militaryLevel);
+  const milRatio = getDeterrenceRating() / Math.max(1, def.militaryLevel);
   const relFactor = (ns.relations + 100) / 100;
   return Math.max(0.1, Math.min(3.0, milRatio * relFactor));
 }
@@ -449,13 +450,70 @@ function computeNationRelations(nationId) {
   return alliance ? Math.max(ALLIANCE_RELATIONS_FLOOR, clamped) : clamped;
 }
 
-// Military strength: scales with accumulated militaryLevel, soft-capped by population manpower.
-function getMilitaryStrength() {
-  const raw = MILITARY_STRENGTH_MAX * (G.militaryLevel / 100);
+// Military branches (Phase 5.1) ============================================================
+
+// Weighted 0\u2013100 deterrence score: Army 50%, Navy 25%, Air Force 25%.
+// Used for leverage in trade negotiations and the Military screen.
+function getDeterrenceRating() {
+  return G.armyLevel * 0.5 + G.navyLevel * 0.25 + G.airForceLevel * 0.25;
+}
+
+// Army strength: Army's contribution to deterrence, manpower-gated by population.
+function getArmyStrength() {
+  const raw = ARMY_STRENGTH_MAX * (G.armyLevel / 100);
   return Math.min(raw, G.population * MILITARY_MANPOWER_RATIO);
 }
 
-// Resource Deposits (Phase 3.5) ============================================================
+function getNavyStrength() {
+  return NAVY_STRENGTH_MAX * (G.navyLevel / 100);
+}
+
+function getAirForceStrength() {
+  return AIRFORCE_STRENGTH_MAX * (G.airForceLevel / 100);
+}
+
+// Total deterrence in absolute strength units (sum of all branch strengths).
+function getTotalMilitaryStrength() {
+  return getArmyStrength() + getNavyStrength() + getAirForceStrength();
+}
+
+// Legacy alias used by history snapshot.
+function getMilitaryStrength() { return getTotalMilitaryStrength(); }
+
+// ── Goods flow / Supply system (Phase 5.2) ────────────────────────────────────────────────
+// Delivery efficiency: 50% base + 50% from infra level. Low infra = goods rot at source.
+function getGoodsProduced()       { return G.manufacturingLevel * GOODS_PER_MFG_LEVEL; }
+function getGoodsDeliveryEff()    { return 0.5 + 0.5 * (G.infraLevel / 100); }
+function getGoodsDelivered()      { return getGoodsProduced() * getGoodsDeliveryEff(); }
+function getCivilianGoodsDemand() { return G.population * GOODS_PER_MILLION_POP; }
+function getMilitaryGoodsDemand() { return getArmyStrength() * GOODS_PER_ARMY_STRENGTH; }
+function getTotalGoodsDemand()    { return getCivilianGoodsDemand() + getMilitaryGoodsDemand(); }
+// 0–1: fraction of demand covered. 1 = fully supplied; <1 = deficit.
+function getSupplyRatio() {
+  const demand = getTotalGoodsDemand();
+  if (demand <= 0) return 1;
+  return Math.min(1, getGoodsDelivered() / demand);
+}
+function getSupplyHappinessPenalty() {
+  return SUPPLY_HAPPINESS_PENALTY_MAX * Math.max(0, 1 - getSupplyRatio());
+}
+// 0–1 army combat effectiveness multiplier (used by Phase 5.6+ war system).
+function getArmySupplyEffectiveness() { return getSupplyRatio(); }
+
+// Province installations (Phase 5.3)
+function getInstallationCountInProvince(type, provinceId) {
+  return G.installations.filter(i => i.type === type && i.provinceId === provinceId).length;
+}
+function getInstallationsInProvince(provinceId) {
+  return G.installations.filter(i => i.provinceId === provinceId);
+}
+function getInstallationBuildCost(type, provinceId) {
+  const existing = getInstallationCountInProvince(type, provinceId);
+  return Math.round(INSTALLATION_TYPES[type].buildCost * (1 + existing * INSTALLATION_BUILD_COST_SCALE));
+}
+function getTotalInstallationMaintenance() {
+  return G.installations.reduce((sum, i) => sum + (INSTALLATION_TYPES[i.type]?.maintenance || 0), 0);
+}
 
 // Returns the max number of deposit slots for a province (stored directly on the province).
 function getRegionCapacity(provinceId) {

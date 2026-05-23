@@ -24,18 +24,23 @@ function initGame(empireName) {
     researchProgress: 0,
 
     // Economic sector levels (0–100), built by spending on corresponding policies
-    miningLevel: 0,
-    manufacturingLevel: 0,
+    miningLevel: 10,
+    manufacturingLevel: 10,
     logisticsLevel: 0,
     commerceLevel: 0,
     financeLevel: 0,
     prospectingLevel: 0,
 
-    // Social and military sector levels (0–100), built by spending on corresponding policies.
+    // Social sector levels (0–100), built by spending on corresponding policies.
     // Effects come from accumulated levels, not current spending.
     healthcareLevel: 0,
     educationLevel: 0,
-    militaryLevel: 0,
+
+    // Military branch levels (0–100) — Phase 5.1.
+    // Each branch is unlocked by a separate tech; all decay at full SECTOR_DECAY when unfunded.
+    armyLevel:     0,
+    navyLevel:     0,
+    airForceLevel: 0,
 
     // Research level (0 – ceiling). Ceiling starts at RESEARCH_LEVEL_BASE_CEILING and is raised
     // by completing research projects. Determines RP/turn toward active technology research.
@@ -69,12 +74,22 @@ function initGame(empireName) {
       infrastructure: 0,
       healthcare: 0,
       education: 0,
-      military: 0,
+      army: 0,
+      navy: 0,
+      airForce: 0,
       research: 0,
       prospecting: 0,
     },
 
-    unlockedTechs: [],
+    // TEST: military + diplomacy techs pre-unlocked for Phase 5.3 testing
+    unlockedTechs: [
+      'standingArmy', 'navalFleet', 'airForceEstablishment',
+      'tradeAgreements', 'diplomacyCorps', 'culturalExchange',
+      'strategicAlliances', 'culturalDiplomacy', 'economicUnions', 'unMembership',
+    ],
+
+    // Province installations (Phase 5.3) — [{ type: 'airfield'|'navalBase', provinceId: string }]
+    installations: [],
 
     // Resource types unlocked via Industrial path techs (used by Phase 3.5 deposits)
     // Iron and Coal are always discoverable (no tech required).

@@ -46,11 +46,36 @@ const HEALTHCARE_HAPPINESS_MAX   = 25;    // happiness contribution at healthcar
 const EDUCATION_HAPPINESS_MAX    = 10;    // happiness contribution at educationLevel 100
 const EDUCATION_GDP_GROWTH_MAX   = 0.015; // GDP growth bonus at educationLevel 100
 const EDUCATION_RP_BONUS_MAX     = 3;     // RP/centre bonus at educationLevel 100
-const MILITARY_STRENGTH_MAX      = 50;    // military strength at militaryLevel 100
-const MILITARY_HAPPINESS_PENALTY = 3;     // happiness penalty at militaryLevel 100
+
+// Military branches (Phase 5.1)
+// getDeterrenceRating() returns a 0–100 weighted score (army 50%, navy 25%, air 25%).
+// Army strength is further manpower-gated by population × MILITARY_MANPOWER_RATIO.
+const ARMY_STRENGTH_MAX      = 30;   // army contribution to deterrence at armyLevel 100 (manpower-gated)
+const NAVY_STRENGTH_MAX      = 10;   // navy contribution to deterrence at navyLevel 100
+const AIRFORCE_STRENGTH_MAX  = 10;   // air force contribution to deterrence at airForceLevel 100
+const ARMY_HAPPINESS_PENALTY = 3;    // happiness penalty at armyLevel 100
 
 // Manufacturing import cost: paid per turn when Manufacturing level exceeds Mining level
 const MANUFACTURING_IMPORT_COST_PER_LEVEL = 0.3; // $M/turn per level gap
+
+// Goods flow / Supply system (Phase 5.2)
+// Production: manufacturingLevel × GOODS_PER_MFG_LEVEL units/turn
+// Delivery:   produced × (0.5 + 0.5 × infraLevel/100)  — infra 0 = 50%, infra 100 = 100%
+// Demand:     population × GOODS_PER_MILLION_POP  +  armyStrength × GOODS_PER_ARMY_STRENGTH
+// Deficit:    happiness penalty (max SUPPLY_HAPPINESS_PENALTY_MAX) + army effectiveness < 1
+const GOODS_PER_MFG_LEVEL           = 1.0;  // goods units produced per manufacturing level per turn
+const GOODS_PER_MILLION_POP         = 0.5;  // goods units demanded per million civilians per turn
+const GOODS_PER_ARMY_STRENGTH       = 1.5;  // goods units demanded per army strength unit per turn
+const SUPPLY_HAPPINESS_PENALTY_MAX  = 10;   // max happiness penalty when supply ratio = 0
+
+// Province installations (Phase 5.3)
+// Airfield + Naval Base implemented now; Fortifications + Supply Depot deferred.
+// Build cost scales: each additional same type in the same province costs more.
+const INSTALLATION_TYPES = {
+  airfield:  { name: 'Airfield',   icon: '✈️', buildCost: 200, maintenance: 1.0, requiresCoastal: false },
+  navalBase: { name: 'Naval Base', icon: '⚓', buildCost: 300, maintenance: 1.5, requiresCoastal: true  },
+};
+const INSTALLATION_BUILD_COST_SCALE = 0.5;  // +50% build cost per existing same type in same province
 
 // Trade routes
 const TRADE_ROUTE_MATURITY_TURNS       = 50;    // turns for route to reach full maturity

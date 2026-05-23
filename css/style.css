@@ -2188,6 +2188,19 @@ section {
 }
 .world-map-svg:active { cursor: grabbing; }
 
+.map-sea-region {
+  pointer-events: none;
+  stroke: none;
+}
+.map-sea-label {
+  font-size: 9px;
+  font-style: italic;
+  fill: rgba(140, 200, 255, 0.55);
+  text-anchor: middle;
+  pointer-events: none;
+  letter-spacing: 1px;
+}
+
 .map-region {
   stroke: #0a1422;
   stroke-width: 1.5;
@@ -2265,3 +2278,107 @@ section {
 .map-info-item-wide { grid-column: span 2; }
 .map-info-label { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
 .map-info-val { font-size: 12px; font-weight: 600; color: var(--text-1); }
+
+/* ============================================================
+   MILITARY SCREEN (Phase 5.1)
+   ============================================================ */
+.mil-panel { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.mil-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.mil-panel-title { font-size: 14px; font-weight: 700; color: var(--text-1); }
+.mil-deterrence-badge {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: var(--bg-3);
+}
+.mil-deterrence-row {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mil-deterrence-hint { font-size: 11px; color: var(--text-3); }
+.mil-branches { display: flex; flex-direction: column; gap: 8px; }
+
+.mil-branch-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mil-branch-locked {
+  opacity: 0.55;
+}
+.mil-branch-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mil-branch-icon { font-size: 18px; }
+.mil-branch-name { font-size: 13px; font-weight: 700; color: var(--text-1); flex: 1; }
+.mil-branch-status {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+.mil-branch-status.active { background: rgba(74,196,108,0.15); color: var(--green); }
+.mil-branch-status.inactive { background: var(--bg-3); color: var(--text-3); }
+.mil-branch-status.locked { background: var(--bg-3); color: var(--text-3); }
+.mil-branch-locked-msg { font-size: 11px; color: var(--text-3); }
+.mil-branch-stats { display: flex; flex-direction: column; gap: 5px; }
+.mil-stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+.mil-stat-label { color: var(--text-3); }
+.mil-stat-value { color: var(--text-1); font-weight: 600; }
+.mil-branch-hint { font-size: 10px; color: var(--text-3); font-style: italic; }
+
+.mil-bar-bg {
+  height: 4px;
+  background: var(--bg-4);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.mil-bar-fill {
+  height: 100%;
+  background: var(--orange);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+.mil-bar-deterrence { background: var(--blue); }
+.mil-bar-supply     { background: var(--green); }
+.mil-supply-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.mil-supply-note    { font-size: 0.78rem; margin-top: 4px; color: var(--text-dim); }
+
+/* Province installations section (Military screen) */
+.mil-installations-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.mil-install-row   { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; border-bottom: 1px solid var(--bg-3); }
+.mil-install-province { font-weight: 600; color: var(--text-1); min-width: 80px; }
+.mil-install-types { flex: 1; color: var(--text-2); }
+.mil-install-cost  { font-size: 11px; flex-shrink: 0; }
+
+/* Province panel on World Map */
+.map-province-selected { stroke: #fff !important; stroke-width: 2 !important; filter: brightness(1.25); cursor: pointer; }
+.map-province          { cursor: pointer; }
+.map-province-badge    { font-size: 11px; color: var(--text-3); margin-left: 6px; }
+.map-install-icons     { font-size: 9px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+.prov-install-section  { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.prov-install-label    { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
+.stat-dim              { color: var(--text-3) !important; font-style: italic; }
+.prov-install-item     { font-size: 12px; color: var(--text-2); padding: 2px 0; }
+.prov-install-divider  { height: 1px; background: var(--border); margin: 6px 0; }
+.prov-install-btn      { width: 100%; text-align: left; margin-bottom: 4px; }

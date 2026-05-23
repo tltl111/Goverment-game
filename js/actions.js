@@ -72,7 +72,7 @@ function openNegotiationFromRoute(nationId) {
   startTradeNegotiation(nationId);
 }
 
-// Send drafted offer — nation responds at end of next turn.
+// Send drafted offer — nation responds immediately.
 function proposeTradeOffer() {
   if (!G.activeNegotiation || G.activeNegotiation.status !== 'drafting') return;
   const neg  = G.activeNegotiation;
@@ -84,9 +84,10 @@ function proposeTradeOffer() {
     threatNs.relations = computeNationRelations(neg.nationId);
     addLog('Trade offer sent to ' + name + ' with threat. Relations −' + relsCost + '.', 'warn');
   } else {
-    addLog('Trade offer sent to ' + name + ' — awaiting response next turn.', 'info');
+    addLog('Trade offer sent to ' + name + '.', 'info');
   }
   neg.status = 'awaiting';
+  _processNegotiationResponse();
   renderAll();
 }
 
@@ -103,6 +104,7 @@ function pushTradeNegotiation(threaten) {
   neg.status = 'awaiting';
   const name = NATIONS[neg.nationId].name;
   addLog(name + ': pushed terms' + (threaten ? ' with threat' : '') + '. Relations −' + relsCost + '.', 'warn');
+  _processNegotiationResponse();
   renderAll();
 }
 
@@ -525,6 +527,15 @@ function endTurn() {
     }
   }
 
+  // 1.3b. Installation maintenance — flat per-turn cost for all built installations
+  {
+    const maintCost = getTotalInstallationMaintenance();
+    if (maintCost > 0) {
+      G.treasury -= maintCost;
+      addLog('Installation maintenance: −' + fmt(maintCost) + ' (' + G.installations.length + ' installation' + (G.installations.length !== 1 ? 's' : '') + ')', 'bad');
+    }
+  }
+
   // 1.4. Update infrastructure level
   {
     const te = getTechEffects();
@@ -555,16 +566,26 @@ function endTurn() {
     }
   }
 
-  // 1.6. Update military level — full SECTOR_DECAY (force readiness degrades quickly without spending)
+  // 1.6. Update military branch levels (Army, Navy, Air Force).
+  // Each branch requires its respective tech; locked branches still decay.
   {
-    const militarySpend = G.policyFunding.military > 0
-      ? getTaxIncome() * (G.policyFunding.military / 100) : 0;
-    if (militarySpend > 0) {
-      const growRate  = SECTOR_GROW_PER_M / (1 + SECTOR_GROW_HARDNESS * G.militaryLevel);
-      const net       = militarySpend * growRate - SECTOR_DECAY;
-      G.militaryLevel = Math.min(100, Math.max(0, G.militaryLevel + net));
-    } else if (G.militaryLevel > 0) {
-      G.militaryLevel = Math.max(0, G.militaryLevel - SECTOR_DECAY);
+    for (const branchId of ['army', 'navy', 'airForce']) {
+      const levelKey  = branchId + 'Level';
+      const policyDef = POLICIES[branchId];
+      const isLocked  = policyDef && policyDef.requiresTech && !G.unlockedTechs.includes(policyDef.requiresTech);
+      if (isLocked) {
+        if (G[levelKey] > 0) G[levelKey] = Math.max(0, G[levelKey] - SECTOR_DECAY);
+        continue;
+      }
+      const spend = (G.policyFunding[branchId] || 0) > 0
+        ? getTaxIncome() * (G.policyFunding[branchId] / 100) : 0;
+      if (spend > 0) {
+        const growRate = SECTOR_GROW_PER_M / (1 + SECTOR_GROW_HARDNESS * G[levelKey]);
+        const net      = spend * growRate - SECTOR_DECAY;
+        G[levelKey]    = Math.min(100, Math.max(0, G[levelKey] + net));
+      } else if (G[levelKey] > 0) {
+        G[levelKey] = Math.max(0, G[levelKey] - SECTOR_DECAY);
+      }
     }
   }
 
@@ -611,10 +632,8 @@ function endTurn() {
     if (routeIncome > 0) addLog('Trade route income: +' + fmt(routeIncome) + ' (' + G.tradeRoutes.length + ' route' + (G.tradeRoutes.length !== 1 ? 's' : '') + ')', 'good');
   }
 
-  // 2.4b. Active negotiation — process nation response if player is awaiting
-  if (G.activeNegotiation?.status === 'awaiting') {
-    _processNegotiationResponse();
-  }
+  // 2.4b. Active negotiation — safety fallback (responses are now instant; this should not fire)
+  // if (G.activeNegotiation?.status === 'awaiting') { _processNegotiationResponse(); }
 
   // 2.5. Apply scaling interest on treasury
   const interestRate = G.treasury < 0 ? getDebtInterestRate() : getSavingsInterestRate();
@@ -766,7 +785,10 @@ function endTurn() {
     financeLevel:    G.financeLevel,
     healthcareLevel: G.healthcareLevel,
     educationLevel:  G.educationLevel,
-    militaryLevel:   G.militaryLevel,
+    armyLevel:       G.armyLevel,
+    navyLevel:       G.navyLevel,
+    airForceLevel:   G.airForceLevel,
+    deterrenceRating: getDeterrenceRating(),
     researchLevel:   G.researchLevel,
     tradeRoutes:     G.tradeRoutes.length,
     militaryStrength: getMilitaryStrength(),
@@ -799,5 +821,22 @@ function endTurn() {
     return true;
   });
 
+  renderAll();
+}
+
+function buildInstallation(type, provinceId) {
+  const province = PROVINCES[provinceId];
+  if (!province || province.nationId !== 'player') return;
+  const def = INSTALLATION_TYPES[type];
+  if (!def) return;
+  if (def.requiresCoastal && !province.coastal) return;
+  const cost = getInstallationBuildCost(type, provinceId);
+  if (G.treasury < cost) {
+    showNotification('Not enough treasury — need ' + fmt(cost) + 'M to build ' + def.name, 'bad');
+    return;
+  }
+  G.treasury -= cost;
+  G.installations.push({ type, provinceId });
+  addLog('Built ' + def.icon + ' ' + def.name + ' in ' + province.name + ': −' + fmt(cost) + ' (maintenance: −' + fmt(def.maintenance) + '/turn)', 'neutral');
   renderAll();
 }

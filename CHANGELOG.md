@@ -4,6 +4,82 @@ All notable changes to Government Simulator will be documented here.
 
 ---
 
+## [Unreleased] — Phase 5.3: Province Installations + Map Sea
+
+### Added
+- **Province installations system**: Build Airfields and Naval Bases in your provinces. Build cost scales +50% per duplicate type in the same province. Maintenance auto-deducted each turn.
+- **Installation UI — three entry points**: map province click panel, Military screen installations section, Policy screen maintenance card.
+- **Province click panel on world map**: Click any player province to see its stats, existing installations, and build buttons.
+- **Vael Sea and Grey Reach**: Two named sea regions now rendered as blue polygons on the world map, tracing the exact coastline of all bordering land provinces. The Vael Sea wraps the north, east, and west of the continent; the Grey Reach covers the south.
+- **Coastal provinces** (18 land provinces): `venmoor`, `stormfen`, `greenvale`, `ashwood`, `gorrath`, `ashpeak`, `aldenmere`, `ironspire`, `havenport`, `marport`, `silverwatch`, `deepstone`, `iraboreal`, `irastone`, `greensward`, `midvale`, `ashbrook`, `dawncoast` now have `coastal: true` and can host Naval Bases. Player provinces are landlocked — sea access requires expansion.
+- `SEA_PROVINCES` constant in data.js holds sea polygon geometry and labels.
+- Sea regions rendered with `.map-sea-region` / `.map-sea-label` CSS classes (italic, light-blue tinted labels).
+
+### Changed
+- Trade negotiations are now instant (AI responds immediately instead of waiting for end-of-turn).
+- Military and Diplomacy techs pre-unlocked in `state.js` for testing Phase 5.3.
+
+### Constants added (constants.js)
+- `INSTALLATION_TYPES` — airfield and naval base definitions (build cost, maintenance, `requiresCoastal`)
+- `INSTALLATION_BUILD_COST_SCALE = 0.5`
+
+---
+
+## [0.22.0] — Phase 5.2: Goods Flow / Supply System
+
+### Added
+- **Goods flow system**: Manufacturing level produces goods each turn; Infrastructure level acts as a delivery efficiency multiplier (50% base + 50% from infra level). Civilian demand scales with population; military demand scales with Army strength.
+- **Guns-vs-butter tension**: When goods delivered < total demand, a supply deficit applies a happiness penalty (max −10) and an army effectiveness modifier (0–1, used by Phase 5.6 war system).
+- **Supply functions in engine.js**: `getGoodsProduced()`, `getGoodsDeliveryEff()`, `getGoodsDelivered()`, `getCivilianGoodsDemand()`, `getMilitaryGoodsDemand()`, `getTotalGoodsDemand()`, `getSupplyRatio()`, `getSupplyHappinessPenalty()`, `getArmySupplyEffectiveness()`.
+- **Goods Supply overview indicator**: Always-visible ratio bar showing delivered vs demanded.
+- **Supply panel in Military screen**: Breakdown of production, delivery efficiency, civilian demand, military demand, ratio bar, and deficit/surplus note.
+- **buildEffectsHint updates**: Infrastructure hints now include `↑ supply delivery`; Manufacturing hints include `↑ goods supply`.
+
+### Changed
+- Starting `miningLevel` and `manufacturingLevel` both raised from 0 → 10 (matching starting infra of 10) so the game does not open in a supply deficit.
+- `calcHappinessTarget()` now subtracts `getSupplyHappinessPenalty()`.
+
+### Constants added
+- `GOODS_PER_MFG_LEVEL = 1.0`
+- `GOODS_PER_MILLION_POP = 0.5`
+- `GOODS_PER_ARMY_STRENGTH = 1.5`
+- `SUPPLY_HAPPINESS_PENALTY_MAX = 10`
+
+---
+
+## [0.21.0] — Phase 5.1: Military Branch Architecture + Military Screen
+
+### Added
+- **Three military branch policies**: `army`, `navy`, `airForce` — each built via the same level-growth model as other sectors (full `SECTOR_DECAY` when unfunded). Each requires a corresponding tech to unlock.
+- **Three military techs** forming a new `military` path in the tech tree:
+  - **Standing Army** (tier 1, 30 RP, no prerequisites) — unlocks Army policy + Military screen tab.
+  - **Naval Fleet** (tier 2, 80 RP, requires Standing Army) — unlocks Navy policy.
+  - **Air Force** (tier 3, 160 RP, requires Naval Fleet + Mass Production) — unlocks Air Force policy.
+- **`G.armyLevel`**, **`G.navyLevel`**, **`G.airForceLevel`** — replace the old single `G.militaryLevel`.
+- **`getDeterrenceRating()`** in `engine.js` — weighted 0–100 score (Army 50%, Navy 25%, Air Force 25%). Used for trade negotiation leverage and the Military screen.
+- **`getArmyStrength()`**, **`getNavyStrength()`**, **`getAirForceStrength()`**, **`getTotalMilitaryStrength()`** — branch-specific strength functions; Army is manpower-gated by population × `MILITARY_MANPOWER_RATIO`.
+- **Military tab** in the dashboard (locked behind Standing Army tech) — shows branch levels, funding status, manpower cap, and combined deterrence rating.
+- **CSS** for Military screen: `.mil-panel`, `.mil-branch-card`, `.mil-branch-locked`, `.mil-stat-row`, `.mil-bar-*`, `.mil-deterrence-badge`.
+- `ARMY_STRENGTH_MAX = 30`, `NAVY_STRENGTH_MAX = 10`, `AIRFORCE_STRENGTH_MAX = 10`, `ARMY_HAPPINESS_PENALTY = 3` in `constants.js`.
+
+### Changed
+- **`calcHappinessTarget()`** — happiness penalty now tied to `G.armyLevel` (via `ARMY_HAPPINESS_PENALTY`) instead of the old `G.militaryLevel`.
+- **`getTradeNegotiationLeverage()`** — uses `getDeterrenceRating()` instead of `G.militaryLevel` for the military ratio.
+- **Overview indicators** — single "Military Level" indicator replaced with Deterrence Rating, Army Level, Navy Level, Air Force Level.
+- **Statistics tab** sector rows — `Military` row replaced with Army, Navy, Air Force rows.
+- **History snapshots** — `militaryLevel` field replaced with `armyLevel`, `navyLevel`, `airForceLevel`, `deterrenceRating`.
+- **`policyFunding`** in state — `military` key replaced with `army`, `navy`, `airForce`.
+- **`renderTabBar()`** — now handles both Diplomacy and Military tab lock/unlock.
+- `buildEffectsHint()` updated for new branch policy keys.
+
+### Removed
+- `G.militaryLevel` — split into three branch levels.
+- `POLICIES.military` — replaced by `POLICIES.army`, `POLICIES.navy`, `POLICIES.airForce`.
+- `MILITARY_STRENGTH_MAX`, `MILITARY_HAPPINESS_PENALTY` constants — replaced by branch-specific constants.
+- `getMilitaryStrength()` remains as a legacy alias for `getTotalMilitaryStrength()`.
+
+---
+
 ## [0.20.0] — Phase 5.0: Province Map Redesign
 
 ### Added
