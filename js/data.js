@@ -494,7 +494,253 @@ const TECHNOLOGIES = {
     requires: ['navalFleet', 'massProduction'],
     unlocks: { policies: ['airForce'] },
     effects: { effectDesc: 'Unlocks Air Force policy' }
-  },};
+  },
+
+  // ============================================================
+  // MILITARY PATH — additional techs
+  // ============================================================
+  fortificationDoctrines: {
+    id: 'fortificationDoctrines', name: 'Fortification Doctrines',
+    tier: 2, path: 'military', cost: 60, icon: '🏰',
+    description: 'Codify military doctrine around fixed defences. Province fortifications become 25% more effective.',
+    requires: ['standingArmy'],
+    unlocks: null,
+    effects: { fortificationDefenseBonus: 0.25, effectDesc: '+25% fortification defense effectiveness' }
+  },
+  militaryLogistics: {
+    id: 'militaryLogistics', name: 'Military Logistics',
+    tier: 3, path: 'military', cost: 110, icon: '📦',
+    description: 'Streamline military supply chains. Increases supply delivery capacity by 15%.',
+    requires: ['standingArmy', 'massProduction'],
+    unlocks: null,
+    effects: { supplyDeliveryMult: 1.15, effectDesc: '+15% supply delivery capacity' }
+  },
+  militaryIntelligence: {
+    id: 'militaryIntelligence', name: 'Military Intelligence',
+    tier: 4, path: 'military', cost: 160, icon: '🔍',
+    description: 'Establish military intelligence services. Reveals enemy unit strength and troop positions in the war panel.',
+    requires: ['standingArmy', 'diplomacyCorps'],
+    unlocks: null,
+    effects: { effectDesc: 'Reveals enemy unit strength in the war panel' }
+  },
+
+  // ============================================================
+  // MILITARY ENGINEERING PATH — equipment tiers, unit development, commander brain
+  // These techs gate Phase 5.7e (Equipment tab) and Phase 5.7f (Commander brain)
+  // ============================================================
+  basicMetallurgy: {
+    id: 'basicMetallurgy', name: 'Basic Metallurgy',
+    tier: 4, path: 'militaryEng', cost: 130, icon: '⚒️',
+    description: 'Standardise alloy composition and casting processes. Foundation for all equipment tier improvements.',
+    requires: ['massProduction', 'standingArmy'],
+    unlocks: null,
+    effects: { effectDesc: 'Foundation for Equipment Design tab (Phase 5.7e)' }
+  },
+  ballisticsResearch: {
+    id: 'ballisticsResearch', name: 'Ballistics Research',
+    tier: 5, path: 'militaryEng', cost: 170, icon: '🎯',
+    description: 'Systematic ballistics science improves all ground unit attack ratings by 10%.',
+    requires: ['basicMetallurgy'],
+    unlocks: null,
+    effects: { unitAttackBonus: 0.10, effectDesc: '+10% all ground unit attack' }
+  },
+  commanderAutonomy: {
+    id: 'commanderAutonomy', name: 'Commander Autonomy',
+    tier: 5, path: 'militaryEng', cost: 160, icon: '🧠',
+    description: 'Delegate tactical decisions to field commanders. Unlocks the Commander Brain system: commanders auto-recruit and refit units.',
+    requires: ['basicMetallurgy'],
+    unlocks: null,
+    effects: { effectDesc: 'Unlocks Commander Brain auto-recruitment system (Phase 5.7f)' }
+  },
+  navalUnitDevelopment: {
+    id: 'navalUnitDevelopment', name: 'Naval Unit Development',
+    tier: 5, path: 'militaryEng', cost: 180, icon: '⚓',
+    description: 'Develop standard naval vessel classes. Unlocks the Naval unit roster — commanders can recruit individual ship types.',
+    requires: ['navalFleet', 'basicMetallurgy'],
+    unlocks: null,
+    effects: { effectDesc: 'Unlocks Naval unit types for Navy commanders (Phase 5.7f)' }
+  },
+  advancedMetallurgy: {
+    id: 'advancedMetallurgy', name: 'Advanced Metallurgy',
+    tier: 6, path: 'militaryEng', cost: 240, icon: '🔩',
+    description: 'High-strength alloys and precision casting unlock the Mk.II equipment tier for all unit types.',
+    requires: ['basicMetallurgy', 'heavyIndustry'],
+    unlocks: null,
+    effects: { effectDesc: 'Unlocks Mk.II equipment tier in Equipment Design tab (Phase 5.7e)' }
+  },
+  airUnitDevelopment: {
+    id: 'airUnitDevelopment', name: 'Air Unit Development',
+    tier: 6, path: 'militaryEng', cost: 220, icon: '🛩️',
+    description: 'Develop standardised aircraft types. Unlocks the Air Force unit roster — commanders can recruit individual aircraft types.',
+    requires: ['airForceEstablishment', 'basicMetallurgy'],
+    unlocks: null,
+    effects: { effectDesc: 'Unlocks Air Force unit types for Air commanders (Phase 5.7f)' }
+  },
+  mechanisedWarfare: {
+    id: 'mechanisedWarfare', name: 'Mechanised Warfare',
+    tier: 7, path: 'militaryEng', cost: 300, icon: '🚛',
+    description: 'Combined arms doctrine integrating armour and infantry. +15% combat effectiveness for armored and mechanized units.',
+    requires: ['advancedMetallurgy'],
+    unlocks: null,
+    effects: { mechanisedCombatBonus: 0.15, effectDesc: '+15% armored and mechanized unit combat effectiveness' }
+  },
+  precisionEngineering: {
+    id: 'precisionEngineering', name: 'Precision Engineering',
+    tier: 7, path: 'militaryEng', cost: 290, icon: '🔧',
+    description: 'Tight manufacturing tolerances improve all unit armor ratings by 15%.',
+    requires: ['advancedMetallurgy', 'electronics'],
+    unlocks: null,
+    effects: { unitDefenseBonus: 0.15, effectDesc: '+15% all unit defense ratings' }
+  },
+  jetPropulsion: {
+    id: 'jetPropulsion', name: 'Jet Propulsion',
+    tier: 7, path: 'militaryEng', cost: 310, icon: '🚀',
+    description: 'Turbojet engines transform air combat. Unlocks Mk.II aircraft types for Air Force commanders.',
+    requires: ['airUnitDevelopment', 'electronics'],
+    unlocks: null,
+    effects: { effectDesc: 'Unlocks Mk.II air unit types (Phase 5.7f)' }
+  },
+  compositeArmour: {
+    id: 'compositeArmour', name: 'Composite Armour',
+    tier: 8, path: 'militaryEng', cost: 420, icon: '🛡️',
+    description: 'Layered ceramic-metal composites unlock the Mk.III equipment tier — the most capable ground equipment available.',
+    requires: ['mechanisedWarfare', 'precisionEngineering'],
+    unlocks: null,
+    effects: { effectDesc: 'Unlocks Mk.III equipment tier in Equipment Design tab (Phase 5.7e)' }
+  },
+  nuclearDeterrence: {
+    id: 'nuclearDeterrence', name: 'Nuclear Deterrence',
+    tier: 9, path: 'militaryEng', cost: 600, icon: '☢️',
+    description: 'Nuclear capability creates a strategic deterrence umbrella. +40 deterrence rating.',
+    requires: ['compositeArmour', 'spaceProgram'],
+    unlocks: null,
+    effects: { deterrenceBonus: 40, effectDesc: '+40 deterrence rating' }
+  },
+
+  // ============================================================
+  // TRADE PATH — additional techs
+  // ============================================================
+  tradeIntelligence: {
+    id: 'tradeIntelligence', name: 'Trade Intelligence',
+    tier: 5, path: 'trade', cost: 180, icon: '📊',
+    description: 'Intelligence networks reveal hidden demand profiles of partner nations, giving a 15% bonus to export quality in negotiations.',
+    requires: ['diplomacyCorps'],
+    unlocks: null,
+    effects: { tradeExportQualityBonus: 0.15, effectDesc: '+15% export quality bonus in trade negotiations' }
+  },
+  financialServices: {
+    id: 'financialServices', name: 'Financial Services',
+    tier: 6, path: 'trade', cost: 260, icon: '💹',
+    description: 'Develop a world-class financial sector that generates GDP growth independent of industrial output.',
+    requires: ['economicUnions'],
+    unlocks: null,
+    effects: { gdpGrowthBonus: 0.02, effectDesc: '+2% GDP growth' }
+  },
+  internationalMediation: {
+    id: 'internationalMediation', name: 'International Mediation',
+    tier: 7, path: 'trade', cost: 340, icon: '🕊️',
+    description: 'Your diplomatic standing allows you to mediate conflicts. Reduces the happiness penalty from active wars by 4 per war.',
+    requires: ['unMembership', 'strategicAlliances'],
+    unlocks: null,
+    effects: { warHappinessPenaltyReduction: 4, effectDesc: '−4 war happiness penalty per active war' }
+  },
+
+  // ============================================================
+  // ECONOMIC PATH — additional techs
+  // ============================================================
+  corporateLaw: {
+    id: 'corporateLaw', name: 'Corporate Law',
+    tier: 3, path: 'economic', cost: 70, icon: '⚖️',
+    description: 'Legal frameworks for commerce reduce the cost of running commercial policy.',
+    requires: ['marketRegulation', 'bankingSystem'],
+    unlocks: null,
+    effects: { policyCostMult: { commerce: 0.90 }, effectDesc: '−10% commerce policy cost' }
+  },
+  advancedFinance: {
+    id: 'advancedFinance', name: 'Advanced Finance',
+    tier: 5, path: 'economic', cost: 200, icon: '📈',
+    description: 'Sophisticated financial instruments channel capital to the most productive sectors.',
+    requires: ['bankingSystem', 'tradeAgreements'],
+    unlocks: null,
+    effects: { gdpGrowthBonus: 0.01, effectDesc: '+1% GDP growth' }
+  },
+
+  // ============================================================
+  // INDUSTRIAL PATH — additional techs
+  // ============================================================
+  syntheticMaterials: {
+    id: 'syntheticMaterials', name: 'Synthetic Materials',
+    tier: 7, path: 'industrial', cost: 320, icon: '🧪',
+    description: 'Synthetic polymers and composites reduce industrial material costs.',
+    requires: ['chemicalIndustry', 'electronics'],
+    unlocks: null,
+    effects: { gdpGrowthBonus: 0.005, industrialDecayMult: 0.90, effectDesc: '+0.5% GDP growth, −10% industry decay rate' }
+  },
+  automatedLogistics: {
+    id: 'automatedLogistics', name: 'Automated Logistics',
+    tier: 9, path: 'industrial', cost: 480, icon: '🤖',
+    description: 'Fully automated supply chain management drastically cuts infrastructure maintenance costs.',
+    requires: ['robotics', 'massProduction'],
+    unlocks: null,
+    effects: { infraDecayMult: 0.85, effectDesc: '−15% infrastructure decay rate' }
+  },
+
+  // ============================================================
+  // SOCIAL PATH — additional techs
+  // ============================================================
+  civilRights: {
+    id: 'civilRights', name: 'Civil Rights',
+    tier: 3, path: 'social', cost: 75, icon: '✊',
+    description: 'Codify civil rights and freedoms. Citizens are happier and more productive.',
+    requires: ['publicHousing'],
+    unlocks: null,
+    effects: { happinessBonus: 12, effectDesc: '+12 happiness' }
+  },
+  civicEducation: {
+    id: 'civicEducation', name: 'Civic Education',
+    tier: 4, path: 'social', cost: 120, icon: '🏫',
+    description: 'Integrate civic participation into the education curriculum, reducing education costs.',
+    requires: ['educationProgram', 'publicHousing'],
+    unlocks: null,
+    effects: { policyCostMult: { education: 0.85 }, effectDesc: '−15% education policy cost' }
+  },
+  socialSafety: {
+    id: 'socialSafety', name: 'Social Safety Net',
+    tier: 5, path: 'social', cost: 175, icon: '🤲',
+    description: 'A comprehensive safety net catches citizens through economic hardship, boosting happiness and growth.',
+    requires: ['advancedWelfare'],
+    unlocks: null,
+    effects: { happinessBonus: 12, gdpGrowthBonus: 0.005, effectDesc: '+12 happiness, +0.5% GDP growth' }
+  },
+
+  // ============================================================
+  // SCIENCE PATH — additional techs
+  // ============================================================
+  computerScience: {
+    id: 'computerScience', name: 'Computer Science',
+    tier: 4, path: 'science', cost: 140, icon: '💾',
+    description: 'Computational methods accelerate research across all disciplines.',
+    requires: ['aiAdministration', 'electronics'],
+    unlocks: null,
+    effects: { techCostMult: 0.85, effectDesc: '−15% all tech research costs' }
+  },
+  biotechnology: {
+    id: 'biotechnology', name: 'Biotechnology',
+    tier: 5, path: 'science', cost: 220, icon: '🧬',
+    description: 'Biotech advances improve healthcare outcomes and public wellbeing.',
+    requires: ['computerScience', 'universalHealthcare'],
+    unlocks: null,
+    effects: { happinessBonus: 10, policyCostMult: { healthcare: 0.90 }, effectDesc: '+10 happiness, −10% healthcare cost' }
+  },
+  materialScience: {
+    id: 'materialScience', name: 'Material Science',
+    tier: 6, path: 'science', cost: 300, icon: '🔬',
+    description: 'Advanced materials research directly supports the military engineering programme, reducing equipment refit costs.',
+    requires: ['quantumComputing', 'basicMetallurgy'],
+    unlocks: null,
+    effects: { effectDesc: '−20% equipment refit cost (Phase 5.7e)' }
+  },
+};
 
 // ============================================================
 // PROJECTS — large discrete investments built with direct treasury spend
@@ -616,11 +862,15 @@ const NATIONS = {
   // demand: how much this nation wants to import from the player (>1 = high demand = player earns more)
   // supply: how well this nation can supply the player's imports (>1 = abundant = player saves more)
   // color/label/capital: used by the world map renderer
+  // seaZone: which sea zone trade routes to this nation pass through.
+  // null = land-adjacent to the player (overland route, no sea disruption risk).
+  // 'vaelSea' = north/east sea.  'greyReach' = south sea.
   valdoria: {
     id: 'valdoria', name: 'Valdoria',
     color: '#5e9c76', labelX: 172, labelY: 280, capitalX: 175, capitalY: 262,
     militaryLevel: 20,
     gdpGrowthRate: 0.020,
+    seaZone: null,
     adjacency: ['player', 'sorenia', 'orzhan'],
     trade: {
       demandByResource: { steel: 1.4, chemicals: 1.1, silicon: 0.8 },
@@ -632,6 +882,7 @@ const NATIONS = {
     color: '#c4884a', labelX: 395, labelY: 117, capitalX: 395, capitalY: 100,
     militaryLevel: 35,
     gdpGrowthRate: 0.030,
+    seaZone: null,
     adjacency: ['player', 'sorenia', 'marveth'],
     trade: {
       demandByResource: { oil: 1.3, rareEarths: 1.0, copper: 1.2 },
@@ -643,6 +894,7 @@ const NATIONS = {
     color: '#8a4a4a', labelX: 173, labelY: 412, capitalX: 173, capitalY: 394,
     militaryLevel: 70,
     gdpGrowthRate: 0.010,
+    seaZone: 'greyReach',
     adjacency: ['valdoria', 'nocthar', 'durenna'],
     trade: {
       demandByResource: { steel: 1.2, chemicals: 1.0, timber: 0.8 },
@@ -654,6 +906,7 @@ const NATIONS = {
     color: '#5a7da8', labelX: 155, labelY: 117, capitalX: 158, capitalY: 100,
     militaryLevel: 10,
     gdpGrowthRate: 0.020,
+    seaZone: 'vaelSea',
     adjacency: ['valdoria', 'kethara'],
     trade: {
       demandByResource: { iron: 1.1, coal: 0.9, timber: 1.0 },
@@ -665,6 +918,7 @@ const NATIONS = {
     color: '#b8924e', labelX: 615, labelY: 403, capitalX: 615, capitalY: 384,
     militaryLevel: 40,
     gdpGrowthRate: 0.020,
+    seaZone: 'vaelSea',
     adjacency: ['marveth', 'nocthar', 'durenna'],
     trade: {
       demandByResource: { steel: 1.0, chemicals: 0.9, silicon: 0.7 },
@@ -676,6 +930,7 @@ const NATIONS = {
     color: '#6b8a5e', labelX: 364, labelY: 490, capitalX: 382, capitalY: 477,
     militaryLevel: 35,
     gdpGrowthRate: 0.025,
+    seaZone: 'greyReach',
     adjacency: ['orzhan', 'nocthar', 'iravan'],
     trade: {
       demandByResource: { steel: 1.3, chemicals: 1.1, iron: 0.8 },
@@ -687,6 +942,7 @@ const NATIONS = {
     color: '#7a6b9e', labelX: 617, labelY: 195, capitalX: 640, capitalY: 175,
     militaryLevel: 20,
     gdpGrowthRate: 0.015,
+    seaZone: null,
     adjacency: ['player', 'kethara', 'iravan'],
     trade: {
       demandByResource: { oil: 1.2, copper: 1.0, rareEarths: 0.8 },
@@ -698,6 +954,7 @@ const NATIONS = {
     color: '#9e6b4a', labelX: 390, labelY: 412, capitalX: 412, capitalY: 393,
     militaryLevel: 55,
     gdpGrowthRate: 0.015,
+    seaZone: null,
     adjacency: ['player', 'orzhan', 'iravan', 'durenna'],
     trade: {
       demandByResource: { chemicals: 1.1, silicon: 0.9, timber: 0.7 },
@@ -1083,6 +1340,8 @@ const SEA_PROVINCES = {
     points: '0,0 800,0 800,460 720,460 724,410 730,330 735,270 740,200 734,150 730,110 640,50 625,47 510,28 395,29 280,30 160,40 90,70 75,130 75,200 75,280 75,360 75,410 75,460 0,460',
     labelX: 680, labelY: 25,
     color: '#1a3f6a',
+    // Nations whose militaryLevel contributes enemy navy strength in this zone.
+    adjacentNations: ['sorenia', 'kethara', 'marveth', 'iravan'],
   },
   greyReach: {
     name: 'Grey Reach',
@@ -1090,5 +1349,102 @@ const SEA_PROVINCES = {
     points: '0,460 75,460 80,470 100,500 230,513 250,515 400,520 550,510 580,505 680,490 720,460 800,460 800,560 0,560',
     labelX: 400, labelY: 545,
     color: '#1a3f6a',
+    // Nations whose militaryLevel contributes enemy navy strength in this zone.
+    adjacentNations: ['orzhan', 'durenna', 'iravan'],
+  },
+};
+
+// ============================================================
+// GROUND UNIT TYPES — Phase 5.7a
+// Each type defines baseline "Mk.I" stats.  Equipment variants are added in Phase 5.7d.
+//
+// Per-unit stat meanings (used in 5.7b/c):
+//   attack  — offensive combat power per size-1 unit
+//   defense — defensive combat power per size-1 unit
+//   speed   — province hops per turn when moving (higher = faster)
+//
+// Cost and upkeep scale linearly with size.
+// Artillery and specialist units with attack:0 cannot capture a province alone.
+// ============================================================
+const UNIT_TYPES = {
+  lightInfantry: {
+    name:          'Light Infantry',
+    icon:          '🪖',
+    description:   'Cheap foot soldiers. Excellent at holding defensive positions; slow to advance.',
+    costPerSize:   8,     // M gold one-time recruitment cost per size
+    upkeepPerSize: 1,     // M gold/turn maintenance per size
+    recruitTurns:  2,
+    attack:        3,
+    defense:       6,
+    speed:         2,
+  },
+  mechanizedInfantry: {
+    name:          'Mechanized Infantry',
+    icon:          '🚛',
+    description:   'Infantry with armored transports. Balanced offensive/defensive, moves faster.',
+    costPerSize:   22,
+    upkeepPerSize: 3,
+    recruitTurns:  3,
+    attack:        5,
+    defense:       5,
+    speed:         4,
+  },
+  armoredCorps: {
+    name:          'Armored Corps',
+    icon:          '🛡️',
+    description:   'Tank-heavy assault force. High offensive power and fast advance; weaker on defense.',
+    costPerSize:   55,
+    upkeepPerSize: 8,
+    recruitTurns:  5,
+    attack:        9,
+    defense:       3,
+    speed:         6,
+  },
+  artilleryBattery: {
+    name:          'Artillery Battery',
+    icon:          '💥',
+    description:   'Heavy guns. Cannot capture provinces alone. Adds a 30% attack bonus to all friendly units in the same province.',
+    costPerSize:   30,
+    upkeepPerSize: 5,
+    recruitTurns:  3,
+    attack:        0,   // cannot advance/capture alone
+    defense:       2,
+    speed:         1,
+    supportAttackBonus: 0.30,  // 30% bonus to all friendly attack in same province
+  },
+  reconUnit: {
+    name:          'Recon Unit',
+    icon:          '🔭',
+    description:   'Fast scouts. Low combat strength; reveals enemy unit presence in adjacent provinces.',
+    costPerSize:   12,
+    upkeepPerSize: 2,
+    recruitTurns:  2,
+    attack:        2,
+    defense:       2,
+    speed:         8,
+  },
+  antiAirBattery: {
+    name:          'Anti-Air Battery',
+    icon:          '🚀',
+    description:   'Counters enemy air superiority and strategic bombing over provinces it occupies.',
+    costPerSize:   28,
+    upkeepPerSize: 4,
+    recruitTurns:  3,
+    attack:        0,
+    defense:       3,
+    speed:         2,
+    airDefenseStrength: 6,  // reduces enemy air effectiveness in occupied province
+  },
+  antiTankBattalion: {
+    name:          'Anti-Tank Battalion',
+    icon:          '🎯',
+    description:   'Tank hunters. High effectiveness against Armored Corps; normal against everything else.',
+    costPerSize:   18,
+    upkeepPerSize: 3,
+    recruitTurns:  2,
+    attack:        2,
+    defense:       5,
+    speed:         3,
+    armorPiercingBonus: 4,  // added to attack specifically against armoredCorps
   },
 };

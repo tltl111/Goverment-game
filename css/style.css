@@ -1980,6 +1980,345 @@ section {
 }
 
 /* ============================================================
+   TECH TREE — visual left-to-right layout (Phase 5.7d)
+   ============================================================ */
+
+/* Outer layout: tree on left, queue panel on right */
+.tt-layout {
+  display: flex;
+  gap: 10px;
+  height: calc(100vh - 160px);
+  min-height: 400px;
+}
+
+/* Scroll wrapper: lane labels (sticky) + scrollable tree */
+.tt-scroll-wrapper {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* Fixed lane labels column */
+.tt-lane-labels {
+  position: relative;
+  width: 118px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.tt-lane-label {
+  position: absolute;
+  left: 0;
+  right: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Scrollable canvas area */
+.tt-scroll-area {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+/* Tech tree canvas — sized dynamically in JS */
+.tt-canvas {
+  position: relative;
+}
+
+/* SVG connection lines */
+.tt-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.tt-line {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.tt-line-avail {
+  stroke: #666;
+  stroke-width: 2;
+}
+
+.tt-line-done {
+  stroke: var(--green);
+  stroke-width: 2;
+  opacity: 0.7;
+}
+
+/* Tech nodes */
+.tt-node {
+  position: absolute;
+  border: 1.5px solid #555;
+  border-radius: 6px;
+  background: var(--bg-2);
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform 0.1s, box-shadow 0.1s;
+  box-sizing: border-box;
+}
+
+.tt-node:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+}
+
+/* Progress track (full-width bar at top of node for active research) */
+.tt-progress-track {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tt-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s;
+}
+
+/* Node body */
+.tt-node-body {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.tt-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.tt-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.tt-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.tt-cost {
+  font-size: 10px;
+  color: var(--text-3);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Status variants */
+.tt-node.tt-done {
+  background: rgba(39, 174, 96, 0.1);
+  border-color: var(--green);
+  cursor: default;
+}
+
+.tt-node.tt-done .tt-name  { color: var(--green); }
+.tt-node.tt-done .tt-cost  { color: var(--green); opacity: 0.7; }
+
+.tt-node.tt-active {
+  background: rgba(52, 152, 219, 0.15);
+  border-color: var(--accent);
+  animation: tt-pulse 2s ease-in-out infinite alternate;
+}
+
+@keyframes tt-pulse {
+  from { box-shadow: 0 0 0 0 rgba(52, 152, 219, 0.2); }
+  to   { box-shadow: 0 0 8px 2px rgba(52, 152, 219, 0.5); }
+}
+
+.tt-node.tt-queued {
+  background: rgba(230, 126, 34, 0.1);
+  border-color: #e67e22;
+}
+
+.tt-node.tt-locked {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tt-node.tt-avail:hover {
+  border-color: var(--accent);
+}
+
+/* Status badges (top-right corner of node) */
+.tt-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+}
+
+.tt-badge-done  { background: var(--green); color: #fff; }
+.tt-badge-active { background: var(--accent); color: #fff; }
+.tt-badge-queue { background: #e67e22; color: #fff; }
+
+/* ============================================================
+   TECH QUEUE PANEL
+   ============================================================ */
+.tt-queue-panel {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-y: auto;
+}
+
+.tt-queue-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tt-queue-active {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tt-queue-active-label {
+  font-size: 10px;
+  color: var(--text-3);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tt-queue-active-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.tt-queue-active-bar-track {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.tt-queue-active-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+.tt-queue-active-detail {
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.tt-queue-active-empty {
+  font-size: 11px;
+  color: var(--text-3);
+  font-style: italic;
+  text-align: center;
+  padding: 6px 0;
+}
+
+.tt-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.tt-queue-empty {
+  font-size: 11px;
+  color: var(--text-3);
+  font-style: italic;
+  text-align: center;
+  padding: 8px 0;
+}
+
+.tt-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.tt-queue-row.tt-queue-warn {
+  border-color: #e67e22;
+  background: rgba(230, 126, 34, 0.06);
+}
+
+.tt-queue-num  { font-size: 10px; color: var(--text-3); min-width: 16px; }
+.tt-queue-icon { font-size: 14px; }
+.tt-queue-name { flex: 1; color: var(--text-1); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-queue-cost { font-size: 10px; color: var(--text-3); white-space: nowrap; }
+
+.tt-queue-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  border-radius: 3px;
+  padding: 1px 5px;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.tt-queue-btn:hover:not(:disabled) { background: var(--bg-2); color: var(--text-1); }
+.tt-queue-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.tt-queue-remove { color: var(--red); border-color: var(--red); }
+.tt-queue-remove:hover { background: rgba(231, 76, 60, 0.1); }
+
+.tt-queue-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-3);
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+/* ============================================================
    BUILDINGS TAB
    ============================================================ */
 .buildings-tab-panel {
@@ -2371,6 +2710,63 @@ section {
 .mil-install-types { flex: 1; color: var(--text-2); }
 .mil-install-cost  { font-size: 11px; flex-shrink: 0; }
 
+/* Command Assignments section (Military screen — Phase 5.4) */
+.mil-commanders-section   { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.mil-fleet-status         { margin: 8px 0; }
+.mil-sea-zones            { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.mil-sea-zone-row         { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; background: var(--bg-2); border-radius: 4px; border: 1px solid var(--border); }
+.mil-sea-zone-name        { font-size: 12px; font-weight: 600; color: var(--text-1); }
+.mil-sea-zone-info        { font-size: 11px; color: var(--text-3); }
+.mil-bar-sea              { background: linear-gradient(90deg, #3a7bd5, #00d2ff); }
+.mil-bar-sea-contested    { background: linear-gradient(90deg, #c0392b, #e74c3c); }
+.mil-sea-control-label    { font-size: 11px; font-weight: 600; }
+.mil-commander-list       { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.mil-commander-card       { background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+.mil-commander-header     { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.mil-commander-icon       { font-size: 16px; flex-shrink: 0; }
+.mil-commander-name       { font-size: 13px; font-weight: 600; color: var(--text-1); flex: 1; min-width: 0; }
+.mil-commander-branch     { font-size: 11px; color: var(--text-3); background: var(--bg-3); border-radius: 3px; padding: 1px 5px; }
+.mil-commander-remove     { margin-left: auto; background: none; border: 1px solid var(--border); color: var(--text-3); cursor: pointer; border-radius: 3px; padding: 1px 6px; font-size: 11px; flex-shrink: 0; }
+.mil-commander-remove:hover { border-color: #c0392b; color: #e74c3c; }
+.mil-commander-controls   { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mil-commander-label      { font-size: 11px; color: var(--text-3); display: flex; align-items: center; gap: 4px; }
+.mil-commander-alloc      { width: 50px; padding: 2px 4px; background: var(--bg-3); border: 1px solid var(--border); color: var(--text-1); border-radius: 3px; font-size: 12px; text-align: right; }
+.mil-commander-select     { padding: 2px 4px; background: var(--bg-3); border: 1px solid var(--border); color: var(--text-1); border-radius: 3px; font-size: 12px; }
+.mil-add-commander        { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
+.mil-commander-name-input { flex: 1; min-width: 120px; padding: 4px 8px; background: var(--bg-3); border: 1px solid var(--border); color: var(--text-1); border-radius: 4px; font-size: 12px; }
+.mil-add-btn              { padding: 4px 12px; background: var(--accent); color: #fff; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; }
+.mil-add-btn:hover        { filter: brightness(1.15); }
+
+/* Army commander — budget + unit roster (Phase 5.7a) */
+.mil-army-budget-row      { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.mil-budget-summary       { font-size: 11px; color: var(--text-3); }
+.mil-unit-roster          { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
+.mil-unit-empty           { font-size: 11px; color: var(--text-3); font-style: italic; }
+.mil-unit-row             { display: flex; align-items: center; gap: 6px; padding: 3px 6px; background: var(--bg-3); border-radius: 4px; font-size: 11px; }
+.mil-unit-icon            { font-size: 14px; flex-shrink: 0; }
+.mil-unit-name            { font-weight: 600; color: var(--text-1); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mil-unit-type            { color: var(--text-3); flex-shrink: 0; }
+.mil-unit-size            { color: var(--text-2); flex-shrink: 0; }
+.mil-unit-upkeep          { flex-shrink: 0; }
+.mil-unit-status          { flex-shrink: 0; font-size: 10px; border-radius: 3px; padding: 1px 4px; }
+.mil-unit-status.ready    { background: #1a4a2a; color: #4caf7d; }
+.mil-unit-status.recruiting { background: #3a3010; color: #d4a830; }
+.mil-unit-disband         { margin-left: 4px; background: none; border: 1px solid var(--border); color: var(--text-3); cursor: pointer; border-radius: 3px; padding: 0px 5px; font-size: 10px; flex-shrink: 0; }
+.mil-unit-disband:hover   { border-color: #c0392b; color: #e74c3c; }
+.mil-recruit-form         { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid var(--border); }
+.mil-unit-pos             { font-size: 10px; color: var(--text-3); flex-shrink: 0; }
+
+/* Commander order row (Phase 5.7b) */
+.mil-army-order-row   { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.mil-order-status     { font-size: 11px; color: var(--text-3); margin-left: auto; }
+.mil-unit-status.moving { color: #f0a030; background: rgba(240,160,48,0.12); padding: 1px 5px; border-radius: 8px; font-size: 10px; }
+
+/* Unit icons on the world map (Phase 5.7b) */
+.map-unit-icon      { font-size: 13px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)); }
+.map-unit-count-bg  { fill: #c0392b; }
+.map-unit-count     { font-size: 9px; fill: #fff; text-anchor: middle; dominant-baseline: middle; font-weight: bold; pointer-events: none; }
+.map-province-staging { stroke: #e67e22 !important; stroke-width: 2.5 !important; }
+
 /* Province panel on World Map */
 .map-province-selected { stroke: #fff !important; stroke-width: 2 !important; filter: brightness(1.25); cursor: pointer; }
 .map-province          { cursor: pointer; }
@@ -2382,3 +2778,44 @@ section {
 .prov-install-item     { font-size: 12px; color: var(--text-2); padding: 2px 0; }
 .prov-install-divider  { height: 1px; background: var(--border); margin: 6px 0; }
 .prov-install-btn      { width: 100%; text-align: left; margin-bottom: 4px; }
+
+/* Trade route path lines drawn on the SVG world map (Phase 5.6) */
+.map-trade-path        { fill: none; stroke: #f0c040; stroke-width: 2; stroke-dasharray: 6 3; pointer-events: none; }
+.map-trade-path-sea    { stroke: #60c8f0; }  /* sea routes shown in blue */
+.map-trade-path-label  { font-size: 9px; fill: #f0c040; text-anchor: middle; dominant-baseline: auto; pointer-events: none; }
+
+/* War map styles (Phase 5.7c) */
+.map-region-at-war        { stroke: #c0392b !important; stroke-width: 1.5 !important; }
+.map-province-occupied    { fill: #4a7c3f; stroke: #a0e880; stroke-width: 2; cursor: pointer; }
+.map-province-contested   { stroke: #e67e22; stroke-width: 2.5; stroke-dasharray: 4 3; animation: siege-pulse 1.2s ease-in-out infinite alternate; }
+@keyframes siege-pulse    { from { stroke-opacity: 0.6; } to { stroke-opacity: 1; } }
+.map-siege-progress       { font-size: 9px; fill: #e67e22; font-weight: bold; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+
+/* AI unit icons on the map */
+.map-ai-unit-icon      { font-size: 13px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; filter: drop-shadow(0 0 2px rgba(180,0,0,0.9)); opacity: 0.85; }
+.map-ai-unit-count-bg  { fill: #7a1a1a; }
+.map-ai-unit-count     { font-size: 9px; fill: #ffaaaa; text-anchor: middle; dominant-baseline: middle; font-weight: bold; pointer-events: none; }
+
+/* War section in nation info panel */
+.map-war-section          { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.map-declare-war-btn      { background: #7a1a1a; color: #ffcccc; border: 1px solid #c0392b; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; width: 100%; }
+.map-declare-war-btn:hover { background: #c0392b; }
+.map-war-active           { background: rgba(192,57,43,0.08); border-radius: 4px; padding: 6px 8px; }
+.map-war-header           { font-size: 12px; font-weight: 600; color: #e74c3c; margin-bottom: 4px; }
+.map-war-stats            { font-size: 11px; color: var(--text-3); margin-bottom: 6px; }
+.map-sue-badge            { font-size: 10px; color: #f0a030; margin-left: 6px; }
+.map-peace-btn            { background: #1a4a2e; color: #aaffcc; border: 1px solid #27ae60; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; width: 100%; }
+.map-peace-btn:hover      { background: #27ae60; color: #fff; }
+
+/* Peace deal modal */
+.peace-modal-overlay      { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+.peace-modal              { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 20px; min-width: 320px; max-width: 420px; }
+.peace-modal-title        { font-size: 16px; font-weight: 700; color: var(--text-1); margin-bottom: 4px; }
+.peace-modal-subtitle     { font-size: 12px; color: var(--text-3); margin-bottom: 12px; }
+.peace-province-list      { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; max-height: 200px; overflow-y: auto; }
+.peace-province-row       { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.peace-province-row input { cursor: pointer; }
+.peace-no-provinces       { font-size: 12px; color: var(--text-3); font-style: italic; }
+.peace-modal-actions      { display: flex; gap: 8px; }
+.peace-modal-actions .btn-primary   { flex: 1; }
+.peace-modal-actions .btn-secondary { flex: 1; background: none; border: 1px solid var(--border); color: var(--text-2); border-radius: 4px; padding: 6px 12px; cursor: pointer; }

@@ -211,11 +211,11 @@ function getEffectiveGrowthRate() {
 // The actual G.happiness pool converges toward this target slowly each turn.
 function calcHappinessTarget() {
   let h = HAPPINESS_BASELINE;
-  // Social policy levels contribute happiness based on accumulated investment
   h += HEALTHCARE_HAPPINESS_MAX * (G.healthcareLevel / 100);
   h += EDUCATION_HAPPINESS_MAX  * (G.educationLevel  / 100);
   h -= ARMY_HAPPINESS_PENALTY * (G.armyLevel / 100);
   h -= getSupplyHappinessPenalty();
+  h -= (G.wars?.length || 0) * WAR_HAPPINESS_PENALTY;
   // Tax: 0% gives +15 happiness, 15% neutral, higher = penalty
   h -= Math.round((G.taxRate - 0.15) * 100);
   h += getTechEffects().happinessBonus;
@@ -378,15 +378,511 @@ function getTradeRouteImportSaving(route) {
   return saving;
 }
 
-// Combined export income + import savings for a route.
+// Combined export income + import savings for a route, reduced by sea zone disruption.
 function getTradeRouteIncome(route) {
-  return getTradeRouteExportIncome(route) + getTradeRouteImportSaving(route);
+  const base = getTradeRouteExportIncome(route) + getTradeRouteImportSaving(route);
+  return base * getRouteSeaControlMultiplier(route) * getRoutePathEfficiencyMultiplier(route);
 }
 
-// Total trade income across all active routes, multiplied by Seaport Expansion bonus if complete.
+// ============================================================
+// MERCHANT FLEET & SEA CONTROL (Phase 5.4)
+// ============================================================
+
+// Maximum merchant fleet level (base ceiling, raised by future Merchant Shipping projects).
+function getMerchantFleetCeiling() {
+  return MERCHANT_FLEET_BASE_CEILING;  // projects will add bonuses in Phase 6
+}
+
+// Trade throughput capacity this fleet level provides ($M/turn).
+function getMerchantFleetCapacity() {
+  return (G.merchantFleet || 0) * MERCHANT_FLEET_CAPACITY_PER_LEVEL;
+}
+
+// Capacity multiplier applied to total trade income.
+// If total raw trade income < capacity, multiplier = 1 (no bottleneck).
+// If income > capacity, all routes are proportionally reduced.
+function getMerchantFleetCapacityMultiplier() {
+  const capacity = getMerchantFleetCapacity();
+  if (capacity <= 0) return 0;  // no fleet = no trade
+  const rawTotal = G.tradeRoutes.reduce((sum, r) => {
+    const base = getTradeRouteExportIncome(r) + getTradeRouteImportSaving(r);
+    return sum + base;
+  }, 0);
+  if (rawTotal <= 0) return 1;
+  return Math.min(1, capacity / rawTotal);
+}
+
+// Effective strength of a single navy commander patrolling a sea zone.
+// Applies Naval Base staging bonus if any Naval Base exists in a coastal province adjacent to that zone.
+function getNavyCommanderEffectiveStrength(commander) {
+  const baseStrength = G.navyLevel * (commander.strengthAlloc / 100);
+  if (commander.mission !== 'tradeProtection' || !commander.target) return baseStrength;
+  // Check for Naval Base in a coastal province whose nation borders this sea zone
+  const zone = SEA_PROVINCES[commander.target];
+  if (!zone) return baseStrength;
+  const hasAdjacentBase = G.installations.some(inst => {
+    if (inst.type !== 'navalBase') return false;
+    const prov = PROVINCES[inst.provinceId];
+    return prov && prov.coastal && prov.nationId === 'player';
+  });
+  return baseStrength * (hasAdjacentBase ? (1 + NAVAL_BASE_STAGING_BONUS) : 1);
+}
+
+// Sum of effective navy + air superiority strength assigned to a zone.
+function getPlayerNavyStrengthForZone(zoneId) {
+  const navyStr = (G.commanders || [])
+    .filter(c => c.branch === 'navy' && c.mission === 'tradeProtection' && c.target === zoneId)
+    .reduce((sum, c) => sum + getNavyCommanderEffectiveStrength(c), 0);
+  const airStr = getPlayerAirStrengthForZone(zoneId);
+  return navyStr + airStr;
+}
+
+// Enemy navy strength in a sea zone from bordering AI nations' military levels.
+function getEnemyNavyStrengthForZone(zoneId) {
+  const zone = SEA_PROVINCES[zoneId];
+  if (!zone || !zone.adjacentNations) return 0;
+  return zone.adjacentNations.reduce((sum, nationId) => {
+    const ns = G.nations[nationId];
+    return sum + ((ns ? ns.militaryLevel : 0) * NAVY_PRESENCE_FACTOR);
+  }, 0);
+}
+
+// Sea control ratio for a zone: 0 (enemy dominates) to 1 (player dominates).
+// With no player fleet and no enemy navy, defaults to 1 (open seas, uncontested).
+function getSeaControlForZone(zoneId) {
+  const playerStr = getPlayerNavyStrengthForZone(zoneId);
+  const enemyStr  = getEnemyNavyStrengthForZone(zoneId);
+  if (playerStr === 0 && enemyStr === 0) return 1;
+  return playerStr / (playerStr + enemyStr);
+}
+
+// Income multiplier for a single route based on its sea zone control.
+// Overland routes (seaZone null) are unaffected.
+function getRouteSeaControlMultiplier(route) {
+  if (!route.seaZone) return 1;
+  return getSeaControlForZone(route.seaZone);
+}
+
+// ============================================================
+// AIR FORCE — range, strength, sea control contribution (Phase 5.5)
+// ============================================================
+
+// Province IDs of player Airfields.
+function getAirfieldProvinces() {
+  return (G.installations || [])
+    .filter(i => i.type === 'airfield' && PROVINCES[i.provinceId]?.nationId === 'player')
+    .map(i => i.provinceId);
+}
+
+// BFS over province adjacency. Returns minimum hop count from any startId to any targetId.
+// Returns Infinity if none are reachable.
+function bfsMinHops(startIds, targetIds) {
+  const targetSet = new Set(targetIds);
+  const startArr  = Array.isArray(startIds) ? startIds : [startIds];
+  if (startArr.some(id => targetSet.has(id))) return 0;
+  const visited = new Set(startArr);
+  let frontier  = [...startArr];
+  let hops      = 0;
+  while (frontier.length > 0) {
+    hops++;
+    const next = [];
+    for (const id of frontier) {
+      for (const adj of (PROVINCES[id]?.adjacency || [])) {
+        if (targetSet.has(adj)) return hops;
+        if (!visited.has(adj)) { visited.add(adj); next.push(adj); }
+      }
+    }
+    frontier = next;
+  }
+  return Infinity;
+}
+
+// Coastal province IDs that border a given sea zone (used for range-to-zone checks).
+function getSeaZoneCoastalProvinces(zoneId) {
+  const zone = SEA_PROVINCES[zoneId];
+  if (!zone) return [];
+  const nations = new Set(zone.adjacentNations || []);
+  return Object.entries(PROVINCES)
+    .filter(([, p]) => nations.has(p.nationId) && p.coastal)
+    .map(([id]) => id);
+}
+
+// Returns true if an air mission targeting 'target' is within range of a player Airfield.
+// mission: 'airSuperiority' | 'strategicBombing'
+// target:  sea zone id (airSuperiority) | nation id (strategicBombing)
+function isAirMissionInRange(mission, target) {
+  if (!target) return false;
+  const airfields = getAirfieldProvinces();
+  if (airfields.length === 0) return false;
+  const range = (mission === 'airSuperiority') ? AIR_SUPERIORITY_RANGE : STRATEGIC_BOMBING_RANGE;
+  let targetProvinces;
+  if (mission === 'airSuperiority') {
+    targetProvinces = SEA_PROVINCES[target]
+      ? getSeaZoneCoastalProvinces(target)
+      : [target];  // province target (future war use)
+  } else {
+    // strategicBombing: any province belonging to the target nation
+    targetProvinces = Object.entries(PROVINCES)
+      .filter(([, p]) => p.nationId === target)
+      .map(([id]) => id);
+  }
+  if (targetProvinces.length === 0) return false;
+  return bfsMinHops(airfields, targetProvinces) <= range;
+}
+
+// Effective strength of an Air Force commander (0 if out of range or no Airfield).
+function getAirCommanderEffectiveStrength(commander) {
+  if (commander.branch !== 'airForce') return 0;
+  const base = G.airForceLevel * commander.strengthAlloc / 100;
+  return isAirMissionInRange(commander.mission, commander.target) ? base : 0;
+}
+
+// Air superiority strength contributed to a sea zone by Air Force commanders.
+// Counts at AIR_SEA_STRENGTH_FACTOR × effective strength (air is less dominant than dedicated navy).
+function getPlayerAirStrengthForZone(zoneId) {
+  return (G.commanders || [])
+    .filter(c => c.branch === 'airForce' && c.mission === 'airSuperiority' && c.target === zoneId)
+    .reduce((sum, c) => sum + getAirCommanderEffectiveStrength(c) * AIR_SEA_STRENGTH_FACTOR, 0);
+}
+
+// ============================================================
+// PROVINCE-LEVEL ROUTING — trade paths + supply from capital (Phase 5.6)
+// ============================================================
+
+// BFS returning the full shortest path as an array of province IDs [start, ..., end].
+// startIds / targetIds can be a single string or array.
+// Returns null if the target is unreachable.
+// Optional restrictToSet: if provided, only expand through provinces in that set
+// (targets are always reachable even if not in the set).
+function bfsPath(startIds, targetIds, restrictToSet) {
+  const targetSet = new Set(Array.isArray(targetIds) ? targetIds : [targetIds]);
+  const startArr  = Array.isArray(startIds) ? startIds : [startIds];
+  // If any start is already in the target set, return it immediately
+  for (const id of startArr) {
+    if (targetSet.has(id)) return [id];
+  }
+  const parent = {};   // provinceId → parent provinceId (null for roots)
+  const visited = new Set(startArr);
+  let frontier = [...startArr];
+  for (const id of startArr) parent[id] = null;
+  let found = null;
+  outer: while (frontier.length > 0) {
+    const next = [];
+    for (const id of frontier) {
+      for (const adj of (PROVINCES[id]?.adjacency || [])) {
+        if (visited.has(adj)) continue;
+        if (restrictToSet && !restrictToSet.has(adj) && !targetSet.has(adj)) continue;
+        visited.add(adj);
+        parent[adj] = id;
+        next.push(adj);
+        if (targetSet.has(adj)) { found = adj; break outer; }
+      }
+    }
+    frontier = next;
+  }
+  if (!found) return null;
+  const path = [];
+  for (let cur = found; cur !== null; cur = parent[cur]) path.unshift(cur);
+  return path;
+}
+
+// Province path from any player province to the nearest province of the given nation.
+// Returns array of province IDs or [] if directly adjacent or unreachable.
+function getTradeRouteLandPath(nationId) {
+  const playerProvs = Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === 'player');
+  const targetProvs = Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === nationId);
+  return bfsPath(playerProvs, targetProvs) || [];
+}
+
+// Path efficiency multiplier for a trade route (penalty-only).
+// Intermediate provinces (neither player nor target nation) contribute an infra penalty
+// when their infraLevel is below ROUTE_PATH_INFRA_REFERENCE.  Max multiplier = 1.0.
+function getRoutePathEfficiencyMultiplier(route) {
+  const path = getTradeRouteLandPath(route.nationId);
+  if (path.length <= 2) return 1; // directly adjacent — no intermediate provinces
+  // Exclude first (player) and last (target) province
+  const intermediate = path.slice(1, -1).filter(id => {
+    const p = PROVINCES[id];
+    return p && p.nationId !== 'player' && p.nationId !== route.nationId;
+  });
+  if (intermediate.length === 0) return 1;
+  const avgInfra = intermediate.reduce((sum, id) => sum + (PROVINCES[id]?.infraLevel || 1), 0) / intermediate.length;
+  return Math.min(1, avgInfra / ROUTE_PATH_INFRA_REFERENCE);
+}
+
+// Capital province for supply routing.  Will become selectable when conquest is added.
+function getCapitalProvinceId() {
+  return 'arvenmoor';
+}
+
+// Supply levels for all player provinces based on hop distance from the capital,
+// travelling only through player-owned provinces.
+// Returns a map: { provinceId: supplyLevel (0–1) }
+function getPlayerProvinceSupplyLevels() {
+  const capital   = getCapitalProvinceId();
+  const playerSet = new Set(Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === 'player'));
+  const distances = { [capital]: 0 };
+  let frontier = [capital];
+  while (frontier.length > 0) {
+    const next = [];
+    for (const id of frontier) {
+      for (const adj of (PROVINCES[id]?.adjacency || [])) {
+        if (!playerSet.has(adj) || distances[adj] !== undefined) continue;
+        distances[adj] = distances[id] + 1;
+        next.push(adj);
+      }
+    }
+    frontier = next;
+  }
+  const levels = {};
+  for (const id of playerSet) {
+    const dist = distances[id] !== undefined ? distances[id] : 99;
+    levels[id] = Math.max(0, 1 - SUPPLY_DISTANCE_DECAY * dist);
+  }
+  return levels;
+}
+
+// Supply level for a single player province (0–1).
+function getProvinceSupplyLevel(provinceId) {
+  return getPlayerProvinceSupplyLevels()[provinceId] ?? 1;
+}
+
+// ============================================================
+// GROUND UNIT HELPERS — Phase 5.7a
+// ============================================================
+
+// Total upkeep cost per turn for all units under a commander (M gold/turn).
+function getCommanderUnitUpkeep(cmd) {
+  return (cmd.units || []).reduce((sum, u) => {
+    const def = UNIT_TYPES[u.type];
+    return sum + (def ? def.upkeepPerSize * u.size : 0);
+  }, 0);
+}
+
+// Gold per turn available after unit upkeep (can be negative = underfunded).
+function getCommanderBudgetFree(cmd) {
+  return (cmd.budget || 0) - getCommanderUnitUpkeep(cmd);
+}
+
+// Sum of all Army commander budgets.
+function getTotalArmyBudgetAllocated() {
+  return (G.commanders || [])
+    .filter(c => c.branch === 'army')
+    .reduce((s, c) => s + (c.budget || 0), 0);
+}
+
+// Total upkeep across all Army commanders' units.
+function getTotalArmyUnitUpkeep() {
+  return (G.commanders || [])
+    .filter(c => c.branch === 'army')
+    .reduce((s, c) => s + getCommanderUnitUpkeep(c), 0);
+}
+
+// Ready units only (excluding those still recruiting).
+function getCommanderReadyUnits(cmd) {
+  return (cmd.units || []).filter(u => u.status === 'ready');
+}
+
+// Total combat power (attack or defense) of ready units under a commander.
+// stat = 'attack' | 'defense'
+function getCommanderCombatPower(cmd, stat) {
+  return getCommanderReadyUnits(cmd).reduce((sum, u) => {
+    const def = UNIT_TYPES[u.type];
+    return sum + (def ? (def[stat] || 0) * u.size : 0);
+  }, 0);
+}
+
+// ============================================================
+// UNIT MOVEMENT HELPERS — Phase 5.7b
+// ============================================================
+
+// How many turns a unit of this type takes to advance one province hop.
+function getUnitTurnsPerHop(unitType) {
+  const speed = UNIT_TYPES[unitType]?.speed || 1;
+  return Math.ceil(UNIT_MOVEMENT_BASE_TURNS / speed);
+}
+
+// The player province an Army commander's units should converge on, based on their order.
+//   'hold'   → capital province
+//   'defend' → the specified player province
+//   'stage'  → the player border province closest to the target nation (BFS path[0])
+function getCommanderDeploymentProvince(cmd) {
+  if (!cmd || cmd.branch !== 'army') return getCapitalProvinceId();
+  const order = cmd.order || { type: 'hold', target: null };
+  if (order.type === 'stage' && order.target) {
+    const path = getTradeRouteLandPath(order.target);
+    return path[0] || getCapitalProvinceId();
+  }
+  if (order.type === 'defend' && order.target) {
+    return order.target;
+  }
+  return getCapitalProvinceId();
+}
+
+// Map of provinceId → array of ready units currently positioned there.
+// Used by the map renderer to draw unit icons.
+function getProvincesWithPlayerUnits() {
+  const result = {};
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready' || !unit.position) continue;
+      if (!result[unit.position]) result[unit.position] = [];
+      result[unit.position].push({ unit, cmd });
+    }
+  }
+  return result;
+}
+
+// Set of player province IDs that are currently designated as staging provinces
+// (commander order = 'stage', units deployed to border province facing the target nation).
+function getStagingProvinces() {
+  const staging = new Set();
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army' || cmd.order?.type !== 'stage') continue;
+    const dep = getCommanderDeploymentProvince(cmd);
+    if (dep) staging.add(dep);
+  }
+  return staging;
+}
+
+// ============================================================
+// WAR & SIEGE HELPERS — Phase 5.7c
+// ============================================================
+
+function isAtWar(nationId) {
+  return (G.wars || []).some(w => w.nationId === nationId);
+}
+
+// Dynamic province owner: respects occupied state (player-occupied shows as 'player').
+// Does NOT reflect formal annexation (use PROVINCES[id].nationId for that).
+function getProvinceEffectiveOwner(provId) {
+  if (G.occupiedProvinces?.[provId]) return 'player';
+  return PROVINCES[provId]?.nationId;
+}
+
+// All provinces that originally (in static data) belong to a nation.
+function getNationProvinces(nationId) {
+  return Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === nationId);
+}
+
+// Provinces currently occupied by the player that originally belonged to nationId.
+function getPlayerOccupiedProvincesOf(nationId) {
+  return Object.entries(G.occupiedProvinces || {})
+    .filter(([, data]) => data.originalOwner === nationId)
+    .map(([id]) => id);
+}
+
+// Fraction of a nation's provinces currently occupied by the player.
+function getOccupiedFraction(nationId) {
+  const total = getNationProvinces(nationId).length;
+  return total === 0 ? 0 : getPlayerOccupiedProvincesOf(nationId).length / total;
+}
+
+// Attack strength contributed by all player units currently in a province.
+function getSiegeAttackStrength(provId) {
+  let atk = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready' || unit.position !== provId) continue;
+      atk += (UNIT_TYPES[unit.type]?.attack || 0) * unit.size;
+    }
+  }
+  return atk;
+}
+
+// Defense strength contributed by all AI units of a nation currently in a province.
+function getAiDefenseStrength(provId, nationId) {
+  let def = 0;
+  const aiMil = G.aiMilitary?.[nationId];
+  if (!aiMil) return 0;
+  for (const cmd of (aiMil.commanders || [])) {
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready' || unit.position !== provId) continue;
+      def += (UNIT_TYPES[unit.type]?.defense || 0) * unit.size;
+    }
+  }
+  return def;
+}
+
+// Defense strength from all player units in a province (used for AI reverse siege).
+function getPlayerDefenseStrength(provId) {
+  let def = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready' || unit.position !== provId) continue;
+      def += (UNIT_TYPES[unit.type]?.defense || 0) * unit.size;
+    }
+  }
+  return def;
+}
+
+// Nearest unoccupied enemy province that is adjacent to any player-controlled or occupied province.
+// Returns a province ID string, or null if none reachable.
+function getAdvanceTargetProvince(nationId) {
+  const controlled = new Set([
+    ...Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === 'player'),
+    ...Object.keys(G.occupiedProvinces || {}),
+  ]);
+  // BFS outward from controlled territory, looking for unoccupied enemy provinces
+  const visited = new Set(controlled);
+  const frontier = [...controlled];
+  while (frontier.length > 0) {
+    const id = frontier.shift();
+    for (const adj of (PROVINCES[id]?.adjacency || [])) {
+      if (visited.has(adj)) continue;
+      visited.add(adj);
+      if (PROVINCES[adj]?.nationId === nationId && !(G.occupiedProvinces?.[adj])) return adj;
+      frontier.push(adj);
+    }
+  }
+  return null;
+}
+
+// For an AI commander, find the nearest player province to advance toward.
+function getAiCounterAttackTarget(cmd) {
+  const positions = (cmd.units || [])
+    .filter(u => u.status === 'ready' && u.position)
+    .map(u => u.position);
+  if (positions.length === 0) return null;
+  const playerProvs = new Set(Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === 'player'));
+  const visited = new Set(positions);
+  const frontier = [...positions];
+  while (frontier.length > 0) {
+    const id = frontier.shift();
+    for (const adj of (PROVINCES[id]?.adjacency || [])) {
+      if (visited.has(adj)) continue;
+      visited.add(adj);
+      if (playerProvs.has(adj)) return adj;
+      frontier.push(adj);
+    }
+  }
+  return null;
+}
+
+// Province → list of AI units there (for map rendering).
+function getProvincesWithAiUnits(nationId) {
+  const result = {};
+  const aiMil = G.aiMilitary?.[nationId];
+  if (!aiMil) return result;
+  for (const cmd of (aiMil.commanders || [])) {
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready' || !unit.position) continue;
+      if (!result[unit.position]) result[unit.position] = [];
+      result[unit.position].push({ unit, cmd });
+    }
+  }
+  return result;
+}
+
+// Total trade income across all active routes, with sea control and fleet capacity applied.
 function getTotalTradeIncome() {
-  const pe = getProjectEffects();
-  return G.tradeRoutes.reduce((sum, r) => sum + getTradeRouteIncome(r), 0) * pe.tradeIncomeMult;
+  const pe       = getProjectEffects();
+  const capMult  = getMerchantFleetCapacityMultiplier();
+  const rawTotal = G.tradeRoutes.reduce((sum, r) => sum + getTradeRouteIncome(r), 0);
+  return rawTotal * pe.tradeIncomeMult * capMult;
 }
 
 // Compute the relations score (-100 to +100) for a nation from all contributing factors.

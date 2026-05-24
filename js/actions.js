@@ -150,6 +150,7 @@ function _finaliseTradeRoute(nationId, offer, isRenegotiation) {
       exportQuality,
       importQuality,
       maturity:     0,
+      seaZone:      NATIONS[nationId]?.seaZone || null,
     });
     const firstContactNs = G.nations[nationId];
     if (firstContactNs) {
@@ -382,6 +383,87 @@ function setActiveResearch(techId) {
   renderAll();
 }
 
+// ============================================================
+// TECH QUEUE (Phase 5.7d)
+// ============================================================
+
+// Internal: start the next valid tech from the queue.
+function _startNextQueuedTech() {
+  while (G.techQueue.length > 0) {
+    const nextId = G.techQueue.shift();
+    const tech = TECHNOLOGIES[nextId];
+    if (!tech || G.unlockedTechs.includes(nextId)) continue;
+    const prereqsMet = tech.requires.every(r => G.unlockedTechs.includes(r));
+    if (!prereqsMet) {
+      addLog('⚠️ Skipped queued tech "' + tech.name + '" — prerequisites not yet met.', 'warn');
+      continue;
+    }
+    G.activeResearch = nextId;
+    G.researchProgress = 0;
+    addLog('🔬 Started researching (queue): ' + tech.name, 'info');
+    showNotification('🔬 Researching: ' + tech.name, 'good');
+    return;
+  }
+}
+
+// Add a tech to the research queue. If nothing is active, starts it immediately.
+function enqueueTech(techId) {
+  const tech = TECHNOLOGIES[techId];
+  if (!tech) return;
+  if (G.unlockedTechs.includes(techId)) return;
+  if (G.activeResearch === techId) return;
+  if (G.researchLevel <= 0) {
+    showNotification('Fund Research policy first!', 'error');
+    return;
+  }
+  // Toggle off if already queued
+  if (G.techQueue.includes(techId)) {
+    G.techQueue = G.techQueue.filter(id => id !== techId);
+    showNotification('Removed from queue: ' + tech.name, 'info');
+    renderAll();
+    return;
+  }
+  G.techQueue.push(techId);
+  // If nothing is active, immediately pull from queue
+  if (!G.activeResearch) {
+    _startNextQueuedTech();
+  }
+  showNotification('⏳ Queued: ' + tech.name, 'info');
+  renderAll();
+}
+
+// Remove a tech from the queue by ID.
+function dequeueTech(techId) {
+  G.techQueue = G.techQueue.filter(id => id !== techId);
+  renderAll();
+}
+
+// Move a queued tech one step earlier in the queue.
+function moveQueueUp(techId) {
+  const idx = G.techQueue.indexOf(techId);
+  if (idx <= 0) return;
+  [G.techQueue[idx - 1], G.techQueue[idx]] = [G.techQueue[idx], G.techQueue[idx - 1]];
+  renderAll();
+}
+
+// Move a queued tech one step later in the queue.
+function moveQueueDown(techId) {
+  const idx = G.techQueue.indexOf(techId);
+  if (idx < 0 || idx >= G.techQueue.length - 1) return;
+  [G.techQueue[idx + 1], G.techQueue[idx]] = [G.techQueue[idx], G.techQueue[idx + 1]];
+  renderAll();
+}
+
+// Cancel the currently active research (does not clear the rest of the queue).
+function cancelResearch() {
+  if (!G.activeResearch) return;
+  const name = TECHNOLOGIES[G.activeResearch]?.name || G.activeResearch;
+  G.activeResearch = null;
+  G.researchProgress = 0;
+  showNotification('Research cancelled: ' + name, 'info');
+  renderAll();
+}
+
 function setProjectFunding(projectId, amountStr) {
   const amount = Math.max(0, parseInt(amountStr, 10) || 0);
   if (G.completedProjects.includes(projectId)) return;
@@ -478,8 +560,293 @@ function breakAlliance(nationId) {
   renderAll();
 }
 
-function endTurn() {
+// ============================================================
+// COMMANDER MANAGEMENT (Phase 5.4)
+// ============================================================
 
+function addCommander(name, branch) {
+  if (!name || !name.trim()) return;
+  const defaultMissions = { navy: 'tradeProtection', army: null, airForce: 'airSuperiority' };
+  const firstSeaZone  = Object.keys(SEA_PROVINCES)[0] || null;
+  const defaultTargets = {
+    navy:      firstSeaZone,
+    army:      null,
+    airForce:  firstSeaZone,
+  };
+
+  const base = {
+    id:     'cmd_' + G.nextCommanderId++,
+    name:   name.trim(),
+    branch,
+  };
+
+  if (branch === 'army') {
+    Object.assign(base, {
+      budget:      0,
+      nextUnitId:  1,
+      units:       [],
+      order:       { type: 'hold', target: null },
+    });
+  } else {
+    Object.assign(base, {
+      strengthAlloc: 10,
+      mission:       defaultMissions[branch] || null,
+      target:        defaultTargets[branch]  || null,
+    });
+  }
+
+  G.commanders.push(base);
+  renderAll();
+}
+
+function updateCommanderAlloc(id, alloc) {
+  const cmd = G.commanders.find(c => c.id === id);
+  if (!cmd) return;
+  cmd.strengthAlloc = Math.max(0, Math.min(100, Number(alloc) || 0));
+  renderAll();
+}
+
+function updateCommanderMission(id, mission, target) {
+  const cmd = G.commanders.find(c => c.id === id);
+  if (!cmd) return;
+  cmd.mission = mission;
+  cmd.target  = target || null;
+  renderAll();
+}
+
+function removeCommander(id) {
+  G.commanders = G.commanders.filter(c => c.id !== id);
+  renderAll();
+}
+
+// ============================================================
+// ARMY UNIT ACTIONS — Phase 5.7a
+// ============================================================
+
+function setCommanderBudget(commanderId, value) {
+  const cmd = G.commanders.find(c => c.id === commanderId);
+  if (!cmd || cmd.branch !== 'army') return;
+  cmd.budget = Math.max(0, Number(value) || 0);
+  renderAll();
+}
+
+// Recruit a new unit under an Army commander.
+// Deducts one-time cost from treasury immediately; unit enters 'recruiting' state.
+function recruitUnit(commanderId, unitType, size, unitName) {
+  const cmd = G.commanders.find(c => c.id === commanderId);
+  if (!cmd || cmd.branch !== 'army') return;
+  const def = UNIT_TYPES[unitType];
+  if (!def) return;
+  const clampedSize = Math.max(1, Math.min(UNIT_MAX_SIZE, Number(size) || 1));
+  const cost = def.costPerSize * clampedSize;
+  if (G.treasury < cost) {
+    addLog(`Not enough funds to recruit ${def.name} (need ${fmt(cost)}M).`, 'bad');
+    return;
+  }
+  G.treasury -= cost;
+  const unitId = commanderId + '_u' + cmd.nextUnitId;
+  cmd.units.push({
+    id:               unitId,
+    name:             (unitName && unitName.trim()) ? unitName.trim() : `${def.name} #${cmd.nextUnitId}`,
+    type:             unitType,
+    size:             clampedSize,
+    status:           'recruiting',
+    recruitTurnsLeft: def.recruitTurns,
+    position:         getCapitalProvinceId(),
+    moveTimer:        0,
+  });
+  cmd.nextUnitId++;
+  addLog(`${cmd.name}: recruiting "${cmd.units[cmd.units.length - 1].name}" — ready in ${def.recruitTurns} turn${def.recruitTurns !== 1 ? 's' : ''}.`, 'good');
+  renderAll();
+}
+
+function disbandUnit(commanderId, unitId) {
+  const cmd = G.commanders.find(c => c.id === commanderId);
+  if (!cmd) return;
+  const unit = (cmd.units || []).find(u => u.id === unitId);
+  if (!unit) return;
+  cmd.units = cmd.units.filter(u => u.id !== unitId);
+  addLog(`${cmd.name}: "${unit.name}" disbanded.`, 'neutral');
+  renderAll();
+}
+
+function setCommanderOrder(commanderId, orderType, target) {
+  const cmd = G.commanders.find(c => c.id === commanderId);
+  if (!cmd || cmd.branch !== 'army') return;
+  cmd.order = { type: orderType, target: target || null };
+  // Reset all unit move timers so they start fresh toward new deployment
+  for (const unit of (cmd.units || [])) unit.moveTimer = 0;
+  renderAll();
+}
+
+// ============================================================
+// AI MILITARY & WAR SYSTEM — Phase 5.7c
+// ============================================================
+
+// Names pool for AI commanders (index by nation position in NATIONS, then by commander index).
+const _AI_GENERAL_NAMES = {
+  valdoria: ['General Harwick',   'Commander Sela'],
+  kethara:  ['General Voss',      'Commander Aira'],
+  orzhan:   ['Marshal Drak',      'Colonel Brennar'],
+  sorenia:  ['Admiral Brenn',     'Captain Lysa'],
+  iravan:   ['General Karim',     'Commander Zara'],
+  durenna:  ['Marshal Theron',    'Commander Bess'],
+  marveth:  ['General Kale',      'Commander Lira'],
+  nocthar:  ['General Morvath',   'Colonel Ashton'],
+};
+
+// Initialise AI militaries for all nations. Called once at game start.
+function initAiMilitaries() {
+  G.aiMilitary = {};
+  for (const nationId of Object.keys(NATIONS)) {
+    const provinces = Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === nationId);
+    const provCount  = provinces.length;
+    if (provCount === 0) continue;
+
+    const cmdCount  = Math.max(1, Math.ceil(provCount / 3));
+    const namePool  = _AI_GENERAL_NAMES[nationId] || ['General', 'Commander'];
+    const commanders = [];
+
+    for (let i = 0; i < cmdCount; i++) {
+      const myProvs = provinces.filter((_, idx) => idx % cmdCount === i);
+      const units   = [];
+
+      // One light infantry unit garrisoning each assigned province
+      for (const provId of myProvs) {
+        units.push({
+          id:        `${nationId}_c${i}_inf_${provId}`,
+          name:      `${NATIONS[nationId].name} Infantry`,
+          type:      'lightInfantry',
+          size:      AI_UNIT_SIZE_PER_PROVINCE,
+          status:    'ready',
+          position:  provId,
+          moveTimer: 0,
+        });
+      }
+      // Lead commander of larger nations also gets an armoured unit
+      if (i === 0 && provCount >= 4) {
+        units.push({
+          id:        `${nationId}_c${i}_armor`,
+          name:      `${NATIONS[nationId].name} Armored Corps`,
+          type:      'armoredCorps',
+          size:      Math.max(3, Math.floor(provCount * 2)),
+          status:    'ready',
+          position:  provinces[0],
+          moveTimer: 0,
+        });
+      }
+
+      commanders.push({
+        id:     `${nationId}_cmd${i}`,
+        name:   namePool[i] || `${NATIONS[nationId].name} Commander ${i + 1}`,
+        branch: 'army',
+        units,
+        order:  { type: 'hold', target: null },
+      });
+    }
+
+    G.aiMilitary[nationId] = { commanders };
+  }
+}
+
+// Declare war on a nation. Converts staged commanders to 'advance' order and pauses trade routes.
+function declareWar(nationId) {
+  if (!nationId || isAtWar(nationId)) return;
+
+  // Check for staging bonus — any commander already staged toward this nation
+  let stagingBonus = false;
+  for (const cmd of G.commanders) {
+    if (cmd.branch === 'army' && cmd.order?.type === 'stage' && cmd.order?.target === nationId) {
+      cmd.order = { type: 'advance', target: nationId };
+      for (const unit of (cmd.units || [])) unit.moveTimer = 0;
+      stagingBonus = true;
+    }
+  }
+
+  G.wars.push({ nationId, declaredTurn: G.turn, stagingBonus, sueForPeaceOffered: false });
+  G.nations[nationId].relations = -100;
+
+  // Pause trade routes
+  for (const route of G.tradeRoutes) {
+    if (route.nationId === nationId) route.paused = true;
+  }
+
+  addLog(`⚔️ WAR DECLARED on ${NATIONS[nationId]?.name}!${stagingBonus ? ' Staging bonus active.' : ''}`, 'bad');
+  renderAll();
+}
+
+// End a war with nationId. keepProvIds = province IDs to formally annex; others are returned.
+function offerPeace(nationId, keepProvIds) {
+  const keepSet = new Set(keepProvIds || []);
+
+  // Formally transfer kept provinces to player empire
+  for (const provId of keepSet) {
+    if (G.occupiedProvinces[provId]?.originalOwner === nationId) {
+      PROVINCES[provId].nationId = 'player';
+      delete G.occupiedProvinces[provId];
+    }
+  }
+  // Return all other occupied provinces of this nation
+  for (const [provId, data] of Object.entries(G.occupiedProvinces)) {
+    if (data.originalOwner === nationId) delete G.occupiedProvinces[provId];
+  }
+  // Clear siege state involving this nation
+  for (const provId of Object.keys(G.siegeState)) {
+    if (PROVINCES[provId]?.nationId === nationId || keepSet.has(provId)) {
+      delete G.siegeState[provId];
+    }
+  }
+  // Remove AI units that ended up in player territory; rebase the rest to home provinces
+  const aiMil = G.aiMilitary[nationId];
+  if (aiMil) {
+    const homeProvs = Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === nationId);
+    for (const cmd of aiMil.commanders) {
+      cmd.units = (cmd.units || []).filter(u => PROVINCES[u.position]?.nationId !== 'player');
+      for (const unit of cmd.units) {
+        if (!homeProvs.includes(unit.position) && homeProvs.length > 0) {
+          unit.position = homeProvs[0];
+        }
+      }
+    }
+  }
+  // Resume trade routes
+  for (const route of G.tradeRoutes) {
+    if (route.nationId === nationId) route.paused = false;
+  }
+
+  G.wars = G.wars.filter(w => w.nationId !== nationId);
+  addLog(`🤝 Peace deal signed with ${NATIONS[nationId]?.name}. ${keepSet.size} province(s) annexed.`, 'good');
+  renderAll();
+}
+
+// Apply size casualties to all player units in a province. ratio = opposing strength / own strength.
+function _applyCasualtiesToPlayerSide(provId, ratio) {
+  const rate = SIEGE_CASUALTY_RATE * Math.min(ratio, 4); // cap ratio at 4× to avoid one-shot wipes
+  for (const cmd of G.commanders) {
+    if (cmd.branch !== 'army') continue;
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready' || unit.position !== provId) continue;
+      unit.size = Math.max(0, unit.size - Math.max(1, Math.round(unit.size * rate)));
+    }
+    cmd.units = cmd.units.filter(u => u.size > 0);
+  }
+}
+
+// Apply size casualties to all AI units of a nation in a province.
+function _applyCasualtiesToAiSide(nationId, provId, ratio) {
+  const rate   = SIEGE_CASUALTY_RATE * Math.min(ratio, 4);
+  const aiMil  = G.aiMilitary[nationId];
+  if (!aiMil) return;
+  for (const cmd of aiMil.commanders) {
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready' || unit.position !== provId) continue;
+      unit.size = Math.max(0, unit.size - Math.max(1, Math.round(unit.size * rate)));
+    }
+    cmd.units = cmd.units.filter(u => u.size > 0);
+  }
+}
+
+function endTurn() {
   // 1. Grow GDP per-capita (productivity growth). Total GDP = population × gdpPerCapita / 1000.
   const growth = getEffectiveGrowthRate();
   G.gdpPerCapita = G.gdpPerCapita * (1 + growth);
@@ -622,18 +989,211 @@ function endTurn() {
   G.treasury += net;
 
   // 2.4. Trade route income — maturity ramps over TRADE_ROUTE_MATURITY_TURNS
+  // Sea control multiplier (per route) and fleet capacity multiplier (global) both applied.
   if (G.tradeRoutes.length > 0) {
     let routeIncome = 0;
     for (const route of G.tradeRoutes) {
       route.maturity++;
-      routeIncome += getTradeRouteIncome(route);
+      routeIncome += getTradeRouteIncome(route);  // already includes sea control per route
     }
+    const capMult = getMerchantFleetCapacityMultiplier();
+    routeIncome *= capMult;
     G.treasury += routeIncome;
     if (routeIncome > 0) addLog('Trade route income: +' + fmt(routeIncome) + ' (' + G.tradeRoutes.length + ' route' + (G.tradeRoutes.length !== 1 ? 's' : '') + ')', 'good');
   }
 
-  // 2.4b. Active negotiation — safety fallback (responses are now instant; this should not fire)
+  // 2.4c. Merchant fleet — grow from active routes + Commerce level; decay when trade is sparse
+  {
+    const activeRoutes = G.tradeRoutes.length;
+    const growth = activeRoutes * MERCHANT_FLEET_ROUTE_GROW + G.commerceLevel * MERCHANT_FLEET_COMMERCE_GROW;
+    const ceiling = getMerchantFleetCeiling();
+    const prev = G.merchantFleet;
+    G.merchantFleet = Math.min(ceiling, Math.max(0, G.merchantFleet + growth - MERCHANT_FLEET_DECAY_RATE));
+    // Log only if the fleet has reached a meaningful level and changed noticeably
+    if (Math.floor(G.merchantFleet / 5) !== Math.floor(prev / 5) && G.merchantFleet > 0) {
+      addLog('Merchant fleet: ' + G.merchantFleet.toFixed(1) + ' (capacity ' + fmt(getMerchantFleetCapacity()) + '/turn)', 'info');
+    }
+  }
+  // (responses are now instant; this should not fire)
   // if (G.activeNegotiation?.status === 'awaiting') { _processNegotiationResponse(); }
+
+  // 2.4d. Strategic bombing — Air Force bombers degrade target nation militaryLevel
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'airForce' || cmd.mission !== 'strategicBombing' || !cmd.target) continue;
+    const effStr = getAirCommanderEffectiveStrength(cmd);
+    if (effStr <= 0) continue;
+    const nation = G.nations[cmd.target];
+    if (!nation) continue;
+    const drain = effStr * STRATEGIC_BOMBING_DRAIN;
+    nation.militaryLevel = Math.max(0, nation.militaryLevel - drain);
+    if (drain > 0.05) {
+      addLog('✈️ Strategic bombing of ' + NATIONS[cmd.target]?.name + ': enemy military −' + drain.toFixed(2), 'good');
+    }
+  }
+
+  // 2.4e. Army unit upkeep and recruiting countdown (Phase 5.7a)
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    // Deduct unit upkeep from treasury
+    const upkeep = getCommanderUnitUpkeep(cmd);
+    if (upkeep > 0) {
+      G.treasury -= upkeep;
+      const shortfall = getCommanderBudgetFree(cmd);
+      if (shortfall < -UNIT_UNDERFUND_WARNING_THRESHOLD) {
+        addLog(`⚠ ${cmd.name}: unit upkeep (${fmt(upkeep)}M) exceeds budget (${fmt(cmd.budget || 0)}M).`, 'bad');
+      }
+    }
+    // Advance recruit timers
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'recruiting') continue;
+      unit.recruitTurnsLeft = Math.max(0, unit.recruitTurnsLeft - 1);
+      if (unit.recruitTurnsLeft === 0) {
+        unit.status = 'ready';
+        addLog(`✅ ${cmd.name}: "${unit.name}" is ready.`, 'good');
+      }
+    }
+  }
+
+  // 2.4f. Army unit movement toward deployment province (Phase 5.7b)
+  // Only for non-wartime orders (hold/stage/defend); 'advance' is handled in 2.4g.
+  {
+    const playerSet = new Set(Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === 'player'));
+    for (const cmd of (G.commanders || [])) {
+      if (cmd.branch !== 'army') continue;
+      if (cmd.order?.type === 'advance') continue; // handled in war section below
+      const deployProv = getCommanderDeploymentProvince(cmd);
+      for (const unit of (cmd.units || [])) {
+        if (unit.status !== 'ready' || !unit.position || unit.position === deployProv) continue;
+        unit.moveTimer = (unit.moveTimer || 0) + 1;
+        const turnsPerHop = getUnitTurnsPerHop(unit.type);
+        if (unit.moveTimer >= turnsPerHop) {
+          unit.moveTimer = 0;
+          const path = bfsPath([unit.position], [deployProv], playerSet);
+          if (path && path.length >= 2) {
+            unit.position = path[1];
+          }
+        }
+      }
+    }
+  }
+
+  // 2.4g. War processing: advance movement, siege resolution, AI counter-attack (Phase 5.7c)
+  for (const war of (G.wars || [])) {
+    const nationId = war.nationId;
+    const aiMil    = G.aiMilitary[nationId];
+
+    // Build set of provinces accessible to player advance (player + occupied + the target nation)
+    const advanceSet = new Set([
+      ...Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === 'player'),
+      ...Object.keys(G.occupiedProvinces),
+      ...Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === nationId),
+    ]);
+
+    // --- Player 'advance' commander movement ---
+    for (const cmd of (G.commanders || [])) {
+      if (cmd.branch !== 'army' || cmd.order?.type !== 'advance' || cmd.order?.target !== nationId) continue;
+      const target = getAdvanceTargetProvince(nationId);
+      if (!target) continue;
+      for (const unit of (cmd.units || [])) {
+        if (unit.status !== 'ready' || !unit.position || unit.position === target) continue;
+        unit.moveTimer = (unit.moveTimer || 0) + 1;
+        const turnsPerHop = getUnitTurnsPerHop(unit.type);
+        if (unit.moveTimer >= turnsPerHop) {
+          unit.moveTimer = 0;
+          const path = bfsPath([unit.position], [target], advanceSet);
+          if (path && path.length >= 2) unit.position = path[1];
+        }
+      }
+    }
+
+    // --- Siege resolution: player units in enemy provinces ---
+    const enemyProvIds = Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === nationId);
+    for (const provId of enemyProvIds) {
+      const atk = getSiegeAttackStrength(provId);
+      if (atk <= 0) continue;
+      if (!G.siegeState[provId]) G.siegeState[provId] = { progress: 0 };
+      const def = getAiDefenseStrength(provId, nationId);
+      const bonus = war.stagingBonus ? STAGING_ATTACK_BONUS : 0;
+      const net   = atk * (1 + bonus) - def;
+      G.siegeState[provId].progress = Math.min(100, Math.max(0,
+        G.siegeState[provId].progress + net / SIEGE_PROGRESS_DIVISOR
+      ));
+      // Casualties
+      if (atk > 0 && def > 0) {
+        _applyCasualtiesToPlayerSide(provId, def / atk);
+        _applyCasualtiesToAiSide(nationId, provId, atk / def);
+      } else if (atk > 0 && def === 0) {
+        // Undefended — just progress, no casualties
+      }
+      // Capture
+      if (G.siegeState[provId].progress >= 100) {
+        G.occupiedProvinces[provId] = { originalOwner: nationId };
+        delete G.siegeState[provId];
+        addLog(`⚔️ ${PROVINCES[provId]?.name || provId} captured!`, 'good');
+      }
+    }
+
+    // --- AI counter-attack movement ---
+    if (aiMil) {
+      for (const cmd of (aiMil.commanders || [])) {
+        const totalAtk = (cmd.units || [])
+          .filter(u => u.status === 'ready')
+          .reduce((s, u) => s + (UNIT_TYPES[u.type]?.attack || 0) * u.size, 0);
+        if (totalAtk < AI_COUNTER_ATTACK_THRESHOLD) continue;
+        const target = getAiCounterAttackTarget(cmd);
+        if (!target) continue;
+        for (const unit of (cmd.units || [])) {
+          if (unit.status !== 'ready' || !unit.position || unit.position === target) continue;
+          unit.moveTimer = (unit.moveTimer || 0) + 1;
+          const turnsPerHop = getUnitTurnsPerHop(unit.type);
+          if (unit.moveTimer >= turnsPerHop) {
+            unit.moveTimer = 0;
+            const path = bfsPath([unit.position], [target]);
+            if (path && path.length >= 2) unit.position = path[1];
+          }
+        }
+      }
+
+      // --- Siege resolution: AI units in player/occupied provinces ---
+      for (const cmd of (aiMil.commanders || [])) {
+        for (const unit of (cmd.units || [])) {
+          if (unit.status !== 'ready' || !unit.position) continue;
+          const owner = getProvinceEffectiveOwner(unit.position);
+          if (owner !== 'player') continue;
+          const aiAtk  = (UNIT_TYPES[unit.type]?.attack || 0) * unit.size;
+          const plrDef = getPlayerDefenseStrength(unit.position);
+          if (aiAtk <= 0) continue;
+          if (!G.siegeState[unit.position]) G.siegeState[unit.position] = { progress: 100 };
+          const net = aiAtk - plrDef;
+          G.siegeState[unit.position].progress = Math.min(100, Math.max(0,
+            G.siegeState[unit.position].progress - net / SIEGE_PROGRESS_DIVISOR
+          ));
+          // Casualties
+          if (aiAtk > 0 && plrDef > 0) {
+            _applyCasualtiesToAiSide(nationId, unit.position, plrDef / aiAtk);
+            _applyCasualtiesToPlayerSide(unit.position, aiAtk / plrDef);
+          }
+          // Province recaptured by AI
+          if (G.siegeState[unit.position].progress <= 0) {
+            delete G.siegeState[unit.position];
+            if (G.occupiedProvinces[unit.position]) {
+              delete G.occupiedProvinces[unit.position];
+              addLog(`⚔️ ${PROVINCES[unit.position]?.name || unit.position} was recaptured by ${NATIONS[nationId]?.name}!`, 'bad');
+            }
+          }
+        }
+      }
+    }
+
+    // --- War treasury drain ---
+    G.treasury -= WAR_TREASURY_DRAIN_PER_TURN;
+
+    // --- Auto-sue for peace check ---
+    if (!war.sueForPeaceOffered && getOccupiedFraction(nationId) >= SUE_FOR_PEACE_THRESHOLD) {
+      war.sueForPeaceOffered = true;
+      addLog(`🏳️ ${NATIONS[nationId]?.name} is requesting peace negotiations.`, 'neutral');
+    }
+  }
 
   // 2.5. Apply scaling interest on treasury
   const interestRate = G.treasury < 0 ? getDebtInterestRate() : getSavingsInterestRate();
@@ -675,6 +1235,8 @@ function endTurn() {
       }
       G.activeResearch = null;
       G.researchProgress = 0;
+      // Auto-advance to next queued tech
+      _startNextQueuedTech();
     }
   }
 

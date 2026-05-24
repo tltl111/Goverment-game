@@ -4,7 +4,133 @@ All notable changes to Government Simulator will be documented here.
 
 ---
 
-## [Unreleased] — Phase 5.3: Province Installations + Map Sea
+## [Unreleased] — Phase 5.7d: Research Tree Redesign
+
+### Added
+- **27 new technologies** (`data.js`): Spread across `military` (fortification doctrines, military logistics, military intelligence), new `militaryEng` path (basic metallurgy, ballistics research, commander autonomy, naval unit development, advanced metallurgy, air unit development, mechanised warfare, precision engineering, jet propulsion, composite armour, nuclear deterrence), `trade` (trade intelligence, financial services, international mediation), `economic` (corporate law, advanced finance), `industrial` (synthetic materials, automated logistics), `social` (civil rights, civic education, social safety net), and `science` (computer science, biotechnology, material science). Total ~57 techs.
+- **`G.techQueue`** (`state.js`): New ordered array of queued techIds, initialized as `[]` in `initGame()`.
+- **Queue actions** (`actions.js`):
+  - `enqueueTech(techId)` — toggles a tech on/off in the queue; starts it immediately if nothing is active.
+  - `dequeueTech(techId)` — removes a tech from the queue.
+  - `moveQueueUp(techId)` / `moveQueueDown(techId)` — reorder queue entries.
+  - `cancelResearch()` — clears the active research and progress.
+  - `_startNextQueuedTech()` (internal) — dequeues the next valid tech (skips already-unlocked or unmet prerequisites) and sets it as the active research.
+- **Auto-advance from queue** (`actions.js` endTurn): After a tech completes, `_startNextQueuedTech()` is called automatically to begin the next queued tech.
+- **Visual tech tree** (`render.js` — `_buildResearchTab`, `_computeTechTreeLayout`): Replaces the old flat tier list. Layout algorithm assigns each tech a column equal to its max prerequisite depth and a row equal to its path lane. Collisions at the same column+row are resolved with fractional row offsets. Renders as:
+  - **SVG bezier connection lines** between prerequisite pairs, colour-coded (green = both unlocked, medium = prereq done, grey = neither done).
+  - **Absolute-positioned tech nodes** with status variants: done (green), active (pulsing blue with progress bar), queued (orange badge showing queue position), available, locked (dimmed, unclickable). Clicking an available or queued tech calls `enqueueTech(id)`.
+  - **Seven path lane labels** on the left (Economic, Industrial, Military, Mil. Engineering, Trade & Diplomacy, Social, Science), colour-coded per path.
+  - **Queue panel** on the right (280 px): current research name + animated progress bar + turns-remaining + Cancel button; queued techs list with ↑ ↓ reorder and × remove; RP/turn and research level footer.
+
+### Changed
+- Research tab render completely replaced — old `.research-tab-tree` / `.tech-card` / `.research-tier` / `.tier-label` markup no longer generated (CSS kept for safety until confirmed unused).
+
+### New CSS classes
+`.tt-layout`, `.tt-scroll-wrapper`, `.tt-lane-labels`, `.tt-lane-label`, `.tt-scroll-area`, `.tt-canvas`, `.tt-svg`, `.tt-line` (+ `.tt-line-avail`, `.tt-line-done`), `.tt-node` (+ `.tt-done`, `.tt-active`, `.tt-queued`, `.tt-locked`, `.tt-avail`), `.tt-progress-track`, `.tt-progress-bar`, `.tt-node-body`, `.tt-icon`, `.tt-name`, `.tt-cost`, `.tt-badge` (+ `.tt-badge-done`, `.tt-badge-active`, `.tt-badge-queue`), `.tt-queue-panel`, `.tt-queue-header`, `.tt-queue-active`, `.tt-queue-active-label`, `.tt-queue-active-name`, `.tt-queue-active-bar-track`, `.tt-queue-active-bar`, `.tt-queue-active-detail`, `.tt-queue-active-empty`, `.tt-queue-list`, `.tt-queue-empty`, `.tt-queue-row`, `.tt-queue-warn`, `.tt-queue-num`, `.tt-queue-icon`, `.tt-queue-name`, `.tt-queue-cost`, `.tt-queue-btn`, `.tt-queue-remove`, `.tt-queue-footer`.
+
+---
+
+## [Unreleased] — Phase 5.7c: War Declaration & Combat
+
+### Added
+- **AI mirror militaries** (`actions.js` — `initAiMilitaries`): All 8 AI nations start with commanders and units scaled to their province count. 1 commander per 3 provinces (min 1), each garrisoning `lightInfantry` (size 8 per assigned province). Nations with 4+ provinces also get one `armoredCorps` unit on their lead commander.
+- **`declareWar(nationId)`** (`actions.js`): Adds a war entry to `G.wars`, sets relations to −100, pauses all trade routes, auto-converts any `stage` orders targeting that nation to `advance` orders (with a staging bonus applied to siege calculations).
+- **`advance` order type**: Units on `advance` orders path through both player and enemy territory (unrestricted BFS). Each turn they step toward the nearest unoccupied enemy province.
+- **Siege mechanics** (endTurn section 2.4g): Each turn, every enemy province with player units accumulates siege progress: `net = atk × stagingBonus − def` → `progress += net / 10`. Province captured when progress ≥ 100. Both sides take proportional unit size casualties each turn (`4%` × clamp(ratio, 1, 4)).
+- **AI counter-attack**: AI commanders with total attack ≥ 20 march toward the nearest player province and apply a reverse siege (progress counts down from 100; reaching 0 recaptures the province).
+- **`offerPeace(nationId, keepProvIds)`** (`actions.js`): Annexes checked provinces (mutates `PROVINCES[id].nationId`), returns unchecked provinces, rebases AI units to home, resumes trade routes, removes war entry.
+- **Auto-sue for peace**: Enemy auto-flags `sueForPeaceOffered = true` in the log when ≥ 60% of their provinces are occupied.
+- **War costs**: −5 treasury/turn and −8 happiness per active war.
+- **War panel in nation info** (`render.js` — `_buildWarPanel`): Shows "Declare War" button when at peace; shows occupied province count, AI unit count, elapsed turns, and "Offer Peace Deal" button when at war. Peace-requesting nations show a badge.
+- **Peace deal modal** (`render.js` — `openPeaceDeal`): Checkbox list of occupied provinces; player selects which to annex before signing.
+- **Map province states**: Occupied provinces render dark green (`.map-province-occupied`); sieged provinces show an animated orange dashed border (`.map-province-contested`); siege progress % label appears below the province name.
+- **AI unit icons on map**: Enemy units during war render as emoji icons in their current province with a red drop-shadow (`.map-ai-unit-icon`).
+- **War border tint**: Nations currently at war with the player show a red province outline (`.map-region-at-war`).
+
+### Changed
+- `calcHappinessTarget` now subtracts `G.wars.length × 8` (war happiness penalty).
+- endTurn section 2.4f now skips commanders on `advance` orders (handled by 2.4g instead).
+
+### New engine helpers
+`isAtWar`, `getProvinceEffectiveOwner`, `getNationProvinces`, `getPlayerOccupiedProvincesOf`, `getOccupiedFraction`, `getSiegeAttackStrength`, `getAiDefenseStrength`, `getPlayerDefenseStrength`, `getAdvanceTargetProvince`, `getAiCounterAttackTarget`, `getProvincesWithAiUnits`.
+
+---
+
+## [Unreleased] — Phase 5.7b: Unit Movement & Pre-War Staging
+
+### Added
+- **Commander orders**: Army commanders now have an `order` object (`type: 'hold' | 'stage' | 'defend'`, `target`). Set via a new **Order row** at the top of each Army commander card (order type dropdown + context-sensitive target dropdown for nation or player province).
+- **`setCommanderOrder(commanderId, type, target)`** (`actions.js`): mutates the commander's order and resets all unit `moveTimer`s.
+- **`getCommanderDeploymentProvince(cmd)`** (`engine.js`): translates an order into a single deployment province — Hold → capital; Defend → named province; Stage → nearest player border province to the target nation (via `getTradeRouteLandPath()[0]`).
+- **`getUnitTurnsPerHop(unitType)`** (`engine.js`): `ceil(UNIT_MOVEMENT_BASE_TURNS / speed)` — Recon/Armored 1 t/hop, Mechanized/Anti-Tank 2 t/hop, Infantry/Anti-Air 3 t/hop, Artillery 6 t/hop.
+- **Unit position state**: recruited units now initialise with `position: capital` and `moveTimer: 0`. Units march toward their commander's deployment province each turn.
+- **endTurn 2.4f movement loop** (`actions.js`): each ready unit that is not at its deployment province increments `moveTimer`; when it reaches `turnsPerHop`, the unit advances one hop via player-province-only BFS and the timer resets.
+- **`bfsPath` restriction parameter** (`engine.js`): optional third argument `restrictToSet` limits traversal to a set of province IDs (used to keep pre-war units inside player territory).
+- **`getProvincesWithPlayerUnits()`** and **`getStagingProvinces()`** (`engine.js`): map helpers for the renderer.
+- **Map unit icons**: ready units drawn as emoji icons at their province (`labelX/labelY` with offsets for multiple units). Count badge when >1 unit shares a province.
+- **Staging province highlight**: provinces designated as the deployment target of a "Stage Against" order get an orange border ring on the map (`.map-province-staging`).
+- **Roster ETA**: unit rows show current province and estimated arrival turn count while en route.
+- Constant `UNIT_MOVEMENT_BASE_TURNS = 6` added to `constants.js`.
+
+---
+
+## [Unreleased] — Phase 5.7a: Unit System
+
+### Added
+- **`UNIT_TYPES` data** (`data.js`): 7 ground unit types — Light Infantry, Mechanized Infantry, Armored Corps, Artillery Battery, Recon Unit, Anti-Air Battery, Anti-Tank Battalion — each with `costPerSize`, `upkeepPerSize`, `recruitTurns`, `attack`, `defense`, `speed`, and type-specific special fields (`supportAttackBonus`, `airDefenseStrength`, `armorPiercingBonus`).
+- **Army commander shape** split from Navy/Air Force: Army commanders now carry `budget` (M gold/turn), `units[]`, and `nextUnitId` instead of `strengthAlloc`/`mission`/`target`.
+- **`recruitUnit(commanderId, type, size, name)`**: deducts one-time cost from treasury, adds a unit in `recruiting` state; recruit timer counts down each turn.
+- **`disbandUnit(commanderId, unitId)`**: removes a unit immediately.
+- **`setCommanderBudget(commanderId, value)`**: sets a commander's authorized per-turn upkeep budget.
+- **endTurn unit logic**: deducts all ready-unit upkeep from treasury each turn; advances recruit timers; fires `✅ ready` log when a unit completes training; warns when upkeep exceeds commander budget.
+- **Army commander card** redesigned: shows budget input, upkeep summary, free-budget indicator (green/red), full unit roster with status badges (⏳ recruiting / ✓ Ready), per-unit disband button, and an inline recruit form (type dropdown, size input, name field).
+- **Engine helpers**: `getCommanderUnitUpkeep`, `getCommanderBudgetFree`, `getTotalArmyBudgetAllocated`, `getTotalArmyUnitUpkeep`, `getCommanderReadyUnits`, `getCommanderCombatPower`.
+- Constants `UNIT_MAX_SIZE = 20` and `UNIT_UNDERFUND_WARNING_THRESHOLD = 0.01` added.
+
+---
+
+## Phase 5.6: Province-Level Routing for Trade and Supply
+
+### Added
+- **BFS path finder** (`bfsPath`): Returns the full shortest province-adjacency path between two province sets — separate from the hop-count function used by air range.
+- **Trade route land paths** (`getTradeRouteLandPath`): Shortest province path from any player province to the nearest province of the target nation; computed live from the adjacency graph.
+- **Path efficiency multiplier** (`getRoutePathEfficiencyMultiplier`): Intermediate third-party provinces (neither player nor target) penalise trade income when their average `infraLevel` < 5. Multiplier = `min(1, avgInfra / 5)` — penalty-only, applied to `getTradeRouteIncome`.
+- **Supply routing from capital** (`getPlayerProvinceSupplyLevels`, `getProvinceSupplyLevel`): BFS from Arvenmoor through player provinces only, 10% supply decay per hop. Capital province = 100%; outermost provinces ≈ 70–80%.
+- **Trade route path visualisation**: Active trade routes draw dashed polylines on the SVG world map connecting province label centres. Gold for overland routes, blue for sea routes. Opacity increases with route maturity (0.35 → 0.80). A small efficiency-% label appears at the midpoint when a penalty applies.
+- **Province panel supply info**: Province click panel now shows Supply (%) and Capital distance (hop count) rows in its info grid.
+- Constants `ROUTE_PATH_INFRA_REFERENCE = 5` and `SUPPLY_DISTANCE_DECAY = 0.10` added to `constants.js`.
+
+---
+
+## Phase 5.5: Air Force Operations
+
+### Added
+- **Air Superiority mission**: Air Force commanders targeting a sea zone add strength (at 0.5× factor) to that zone's sea control — air cover stacks with Navy patrols.
+- **Strategic Bombing mission**: Air Force commanders targeting an enemy nation drain that nation's `militaryLevel` by `effectiveStrength × 0.002` per turn.
+- **Province-hop range system**: `bfsMinHops()` traverses the province adjacency graph to check whether a player Airfield is within range of a mission target. Air Superiority range = 4 hops; Strategic Bombing range = 6 hops.
+- **Out-of-range badge**: Commanders targeting a zone/nation outside Airfield range display ⚠ "Out of range — build Airfield closer" and contribute zero effect.
+- **Coastal province→sea zone mapping**: `getSeaZoneCoastalProvinces()` derives the province set adjacent to each sea zone from the `adjacentNations` list.
+- Default target assigned to new commanders on creation (sea zone for Navy/Air Force; player province for Army).
+
+---
+
+## Phase 5.4: Naval Command System + Merchant Fleet + Sea Control
+
+### Added
+- **Commander System**: Assign named commanders to Army, Navy, or Air Force with a `strengthAlloc` percentage of their branch level and a mission + target. UI in the Military tab: create, configure, and remove commanders.
+- **Merchant Fleet**: `G.merchantFleet` civilian capacity level grows from active trade routes × Commerce investment, decays slowly each turn, and caps total trade income throughput when capacity is below demand.
+- **Sea Control per zone**: Each sea zone (Vael Sea, Grey Reach) has a sea control score = player navy strength / (player + enemy). Navy commanders on `tradeProtection` mission directed at a zone contribute player strength; AI nation military levels near each zone set enemy strength. Trade routes crossing a sea zone have their income multiplied by that zone's sea control.
+- **Naval Base staging bonus**: Navy commanders gain +30% effective strength if any Naval Base is installed in a province adjacent to their target sea zone.
+- **Sea zone status panel**: Military tab shows per-zone player/enemy fleet strength, sea control bar, and active route count.
+- `seaZone` tagged on each trade route at creation (null for overland routes).
+- `adjacentNations` field on `SEA_PROVINCES` entries to determine which AI nations contribute enemy fleet strength.
+
+### Changed
+- Trade route income now applies both per-route sea control multiplier and global merchant fleet capacity multiplier.
+
+---
+
+## Phase 5.3: Province Installations + Map Sea
 
 ### Added
 - **Province installations system**: Build Airfields and Naval Bases in your provinces. Build cost scales +50% per duplicate type in the same province. Maintenance auto-deducted each turn.

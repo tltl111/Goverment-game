@@ -675,76 +675,10 @@ function renderDashboard() {
   }
 
   if (tab === 'research') {
-    const rp = getRpPerTurn();
+    const rp      = getRpPerTurn();
     const ceiling = getResearchCapacityCeiling();
-    const tiers = [...new Set(Object.values(TECHNOLOGIES).map(t => t.tier))].sort((a, b) => a - b);
-    let html = `
-      <div class="research-tab-header">
-        <span class="research-tab-stat">🔬 Research level ${G.researchLevel.toFixed(1)} / ${ceiling}</span>
-        <span class="research-tab-stat">+${rp.toFixed(1)} RP/turn</span>
-      </div>
-      <div class="research-tab-tree">`;
-
-    for (const tier of tiers) {
-      html += `<div class="research-tier"><div class="tier-label">Tier ${tier}</div><div class="tier-techs">`;
-      for (const [id, tech] of Object.entries(TECHNOLOGIES)) {
-        if (tech.tier !== tier) continue;
-        const unlocked      = G.unlockedTechs.includes(id);
-        const reqMet        = tech.requires.every(r => G.unlockedTechs.includes(r));
-        const isActive      = G.activeResearch === id;
-        const busyElsewhere = !!G.activeResearch && !isActive;
-        const available     = !unlocked && reqMet;
-        const effectiveCost = getTechCost(id);
-        const progressPct   = isActive ? Math.min(100, (G.researchProgress / effectiveCost) * 100).toFixed(1) : 0;
-        const turnsLeft     = isActive ? getTurnsToComplete(id) : (rp > 0 ? getTurnsToComplete(id) : null);
-
-        let cls = 'tech-card ';
-        if (unlocked)           cls += 'tech-unlocked';
-        else if (isActive)      cls += 'tech-available tech-researching';
-        else if (!reqMet)       cls += 'tech-locked';
-        else if (busyElsewhere) cls += 'tech-available tech-busy';
-        else                    cls += 'tech-available';
-
-        const missingReqs = tech.requires.filter(r => !G.unlockedTechs.includes(r));
-        const reqText = missingReqs.length > 0 && !unlocked
-          ? `<div class="tech-req">Req: ${missingReqs.map(r => TECHNOLOGIES[r].name).join(', ')}</div>` : '';
-
-        let actionHtml = '';
-        if (isActive) {
-          const turnsRemaining = getTurnsToComplete(id);
-          const turnsLabel = isFinite(turnsRemaining) ? '~' + turnsRemaining + ' turns left' : '—';
-          actionHtml = `
-            <div class="tech-progress-wrap">
-              <div class="tech-progress-bar-bg"><div class="tech-progress-bar-fill" style="width:${progressPct}%"></div></div>
-              <div class="tech-progress-label">${progressPct}% &nbsp;·&nbsp; ${turnsLabel}</div>
-            </div>
-            <button class="btn-cancel-research" onclick="setActiveResearch('${id}')">Cancel</button>`;
-        } else if (available && !busyElsewhere) {
-          actionHtml = `<button class="btn-start-research" onclick="setActiveResearch('${id}')">&#128300; Research</button>`;
-        }
-
-        const costDisplay = unlocked ? '✓ Unlocked'
-          : isActive ? ''
-          : (turnsLeft !== null ? '~' + turnsLeft + ' turns' : 'Fund Research first');
-
-        html += `
-          <div class="${cls}" title="${tech.description}">
-            <span class="tech-icon">${tech.icon}</span>
-            <div class="tech-info">
-              <div class="tech-name">${tech.name}</div>
-              <div class="tech-cost">${costDisplay}</div>
-              <div class="tech-effect">${tech.effects.effectDesc}</div>
-              ${reqText}
-              ${actionHtml}
-            </div>
-            <span class="tech-tier-badge">T${tier}</span>
-          </div>`;
-      }
-      html += '</div></div>';
-    }
-
-    html += '</div>';
-    document.getElementById('tab-research').innerHTML = html;
+    document.getElementById('tab-research').innerHTML =
+      _buildResearchTab(rp, ceiling);
   }
 
   if (tab === 'buildings') {
@@ -1250,6 +1184,7 @@ function renderMilitary() {
         <div class="mil-supply-note ${supplyClass}">${supplyNote}</div>
       </div>
       ${_buildInstallationsSection()}
+      ${_buildCommandersSection()}
       <div class="mil-branches">
         ${armyCard}
         ${navyCard}
@@ -1294,6 +1229,301 @@ function _buildInstallationsSection() {
         <span class="mil-deterrence-badge ${badgeCls}">${badge}</span>
       </div>
       ${listHtml}
+    </div>`;
+}
+
+function _buildCommandersSection() {
+  const navyUnlocked = G.unlockedTechs.includes('navalFleet');
+  const commanders   = G.commanders || [];
+  const fleet        = G.merchantFleet || 0;
+  const fleetCap     = getMerchantFleetCapacity();
+  const capMult      = getMerchantFleetCapacityMultiplier();
+  const capPct       = Math.round(capMult * 100);
+  const capClass     = capMult >= 0.95 ? 'stat-pos' : capMult >= 0.6 ? 'effect-neutral' : 'stat-neg';
+  const fleetCeiling = getMerchantFleetCeiling();
+
+  // --- Merchant fleet status ---
+  const fleetNote = G.tradeRoutes.length === 0
+    ? 'No active trade routes — fleet not growing.'
+    : capMult >= 0.99
+      ? '✓ Fleet capacity sufficient for current trade volume.'
+      : `⚠️ Fleet at capacity — trade income reduced to ${capPct}%. Grow Commerce to expand fleet.`;
+
+  const fleetHtml = `
+    <div class="mil-fleet-status">
+      <div class="mil-stat-row">
+        <span class="mil-stat-label">Merchant Fleet</span>
+        <span class="mil-stat-value">${fleet.toFixed(1)} / ${fleetCeiling} (capacity ${fmt(fleetCap)}/turn)</span>
+      </div>
+      <div class="mil-bar-bg"><div class="mil-bar-fill" style="width:${Math.round(fleet / fleetCeiling * 100)}%"></div></div>
+      <div class="mil-supply-note ${capClass}">${fleetNote}</div>
+    </div>`;
+
+  // --- Sea zone control display ---
+  let seaZonesHtml = '';
+  if (navyUnlocked) {
+    for (const [zoneId, zone] of Object.entries(SEA_PROVINCES)) {
+      const playerStr = getPlayerNavyStrengthForZone(zoneId);
+      const enemyStr  = getEnemyNavyStrengthForZone(zoneId);
+      const ctrl      = getSeaControlForZone(zoneId);
+      const ctrlPct   = Math.round(ctrl * 100);
+      const ctrlClass = ctrl >= 0.75 ? 'stat-pos' : ctrl >= 0.4 ? 'effect-neutral' : 'stat-neg';
+      const seaRoutes = G.tradeRoutes.filter(r => r.seaZone === zoneId);
+      const routeNote = seaRoutes.length > 0 ? ` — ${seaRoutes.length} route${seaRoutes.length !== 1 ? 's' : ''} exposed` : ' — no routes here';
+      seaZonesHtml += `
+        <div class="mil-sea-zone-row">
+          <span class="mil-sea-zone-name">🌊 ${zone.name}</span>
+          <span class="mil-sea-zone-info">Player fleet: ${playerStr.toFixed(1)} · Enemy: ${enemyStr.toFixed(1)}${routeNote}</span>
+          <div class="mil-bar-bg"><div class="mil-bar-fill mil-bar-sea ${ctrl < 0.5 ? 'mil-bar-sea-contested' : ''}" style="width:${ctrlPct}%"></div></div>
+          <span class="mil-sea-control-label ${ctrlClass}">${ctrlPct}% sea control</span>
+        </div>`;
+    }
+  }
+
+  // --- Commander cards ---
+  const BRANCH_ICONS   = { navy: '⚓', army: '⚔️', airForce: '✈️' };
+  const BRANCH_LABELS  = { navy: 'Navy', army: 'Army', airForce: 'Air Force' };
+  const MISSION_LABELS = {
+    tradeProtection: 'Trade Protection',
+    offensivePatrol: 'Offensive Patrol',
+    blockade:        'Blockade',
+    defend:          'Defend',
+    advance:         'Advance',
+    garrison:        'Garrison',
+    airSuperiority:  'Air Superiority',
+    strategicBombing:'Strategic Bombing',
+    airLogistics:    'Air Logistics',
+  };
+
+  function missionOptions(branch) {
+    if (branch === 'navy') {
+      return `<option value="tradeProtection">Trade Protection</option>`;
+    }
+    if (branch === 'army') {
+      return `<option value="defend">Defend (Phase 5.6)</option>`;
+    }
+    // Air Force
+    return [
+      `<option value="airSuperiority">Air Superiority</option>`,
+      `<option value="strategicBombing">Strategic Bombing</option>`,
+    ].join('');
+  }
+
+  function targetOptions(branch, mission) {
+    if (branch === 'navy' && mission === 'tradeProtection') {
+      return Object.entries(SEA_PROVINCES)
+        .map(([id, z]) => `<option value="${id}">${z.name}</option>`).join('');
+    }
+    if (branch === 'army') {
+      const playerProvinces = Object.entries(PROVINCES).filter(([, p]) => p.nationId === 'player');
+      return playerProvinces.map(([id, p]) => `<option value="${id}">${p.name}</option>`).join('');
+    }
+    if (branch === 'airForce') {
+      if (mission === 'airSuperiority') {
+        return Object.entries(SEA_PROVINCES)
+          .map(([id, z]) => `<option value="${id}">${z.name}</option>`).join('');
+      }
+      if (mission === 'strategicBombing') {
+        return Object.entries(NATIONS)
+          .filter(([id]) => id !== 'player')
+          .map(([id, n]) => `<option value="${id}">${n.name}</option>`).join('');
+      }
+    }
+    return `<option value="">N/A</option>`;
+  }
+
+  let cmdListHtml = '';
+  if (commanders.length === 0) {
+    cmdListHtml = '<div class="mil-supply-note">No commanders assigned. Add one below to direct military operations.</div>';
+  } else {
+    for (const cmd of commanders) {
+      const icon      = BRANCH_ICONS[cmd.branch] || '?';
+      const branchLbl = BRANCH_LABELS[cmd.branch] || cmd.branch;
+
+      // ── Army commander: budget + unit roster UI ──────────────────────────
+      if (cmd.branch === 'army') {
+        const order    = cmd.order || { type: 'hold', target: null };
+        const upkeep   = getCommanderUnitUpkeep(cmd);
+        const free     = getCommanderBudgetFree(cmd);
+        const units    = cmd.units || [];
+        const deployProv = getCommanderDeploymentProvince(cmd);
+        const inPosition = units.filter(u => u.status === 'ready' && u.position === deployProv).length;
+        const moving     = units.filter(u => u.status === 'ready' && u.position !== deployProv).length;
+
+        // Order target dropdown
+        let orderTargetHtml = '';
+        if (order.type === 'stage') {
+          const nationOpts = Object.entries(NATIONS)
+            .map(([id, n]) => `<option value="${id}" ${order.target === id ? 'selected' : ''}>${n.name}</option>`)
+            .join('');
+          orderTargetHtml = `<select class="mil-commander-select" onchange="setCommanderOrder('${cmd.id}', 'stage', this.value)">${nationOpts}</select>`;
+        } else if (order.type === 'defend') {
+          const provOpts = Object.keys(PROVINCES)
+            .filter(id => PROVINCES[id].nationId === 'player')
+            .map(id => `<option value="${id}" ${order.target === id ? 'selected' : ''}>${PROVINCES[id].name}</option>`)
+            .join('');
+          orderTargetHtml = `<select class="mil-commander-select" onchange="setCommanderOrder('${cmd.id}', 'defend', this.value)">${provOpts}</select>`;
+        }
+        const deployLabel = deployProv ? (PROVINCES[deployProv]?.name || deployProv) : '—';
+        const statusBadge = (inPosition + moving) > 0
+          ? `<span class="mil-order-status">${inPosition} in position${moving > 0 ? `, ${moving} en route` : ''} → ${deployLabel}</span>`
+          : '';
+
+        // Unit roster rows
+        let rosterHtml = '';
+        if (units.length === 0) {
+          rosterHtml = '<div class="mil-unit-empty">No units. Recruit below.</div>';
+        } else {
+          for (const u of units) {
+            const def       = UNIT_TYPES[u.type] || {};
+            const upkeepRow = (def.upkeepPerSize || 0) * u.size;
+            let statusBadgeUnit;
+            if (u.status === 'recruiting') {
+              statusBadgeUnit = `<span class="mil-unit-status recruiting">⏳ ${u.recruitTurnsLeft}t</span>`;
+            } else if (u.position !== deployProv) {
+              const eta = Math.ceil((getUnitTurnsPerHop(u.type) - (u.moveTimer || 0)) +
+                (bfsMinHops([u.position], [deployProv]) - 1) * getUnitTurnsPerHop(u.type));
+              statusBadgeUnit = `<span class="mil-unit-status moving">🚶 ~${eta}t</span>`;
+            } else {
+              statusBadgeUnit = `<span class="mil-unit-status ready">✓ Staged</span>`;
+            }
+            const posName = PROVINCES[u.position]?.name || u.position || '?';
+            rosterHtml += `
+              <div class="mil-unit-row">
+                <span class="mil-unit-icon">${def.icon || '?'}</span>
+                <span class="mil-unit-name">${u.name}</span>
+                <span class="mil-unit-type">${def.name || u.type}</span>
+                <span class="mil-unit-size">×${u.size}</span>
+                ${statusBadgeUnit}
+                <span class="mil-unit-pos stat-dim">@ ${posName}</span>
+                <span class="mil-unit-upkeep stat-dim">${fmt(upkeepRow)}M/t</span>
+                <button class="mil-unit-disband" onclick="disbandUnit('${cmd.id}','${u.id}')">✕</button>
+              </div>`;
+          }
+        }
+
+        // Recruit type options
+        const typeOptsHtml = Object.entries(UNIT_TYPES)
+          .map(([k, v]) => `<option value="${k}">${v.icon} ${v.name} — ${fmt(v.costPerSize)}M/sz, ${fmt(v.upkeepPerSize)}M/t/sz</option>`)
+          .join('');
+
+        cmdListHtml += `
+          <div class="mil-commander-card">
+            <div class="mil-commander-header">
+              <span class="mil-commander-icon">${icon}</span>
+              <span class="mil-commander-name">${cmd.name}</span>
+              <span class="mil-commander-branch">${branchLbl}</span>
+              <button class="mil-commander-remove" onclick="removeCommander('${cmd.id}')">✕</button>
+            </div>
+            <div class="mil-army-order-row">
+              <label class="mil-commander-label">Order
+                <select class="mil-commander-select" onchange="setCommanderOrder('${cmd.id}', this.value, document.getElementById('otgt_${cmd.id}')?.value)">
+                  <option value="hold" ${order.type === 'hold' ? 'selected' : ''}>Hold at Capital</option>
+                  <option value="stage" ${order.type === 'stage' ? 'selected' : ''}>Stage Against…</option>
+                  <option value="defend" ${order.type === 'defend' ? 'selected' : ''}>Defend Province…</option>
+                </select>
+              </label>
+              <span id="otgt_${cmd.id}">${orderTargetHtml}</span>
+              ${statusBadge}
+            </div>
+            <div class="mil-army-budget-row">
+              <label class="mil-commander-label">Budget
+                <input type="number" class="mil-commander-alloc" min="0" step="1" value="${cmd.budget || 0}"
+                  onchange="setCommanderBudget('${cmd.id}', this.value)"> M/turn
+              </label>
+              <span class="mil-budget-summary">
+                Upkeep: <strong>${fmt(upkeep)}M</strong> &nbsp;|&nbsp;
+                <span class="${free >= 0 ? 'stat-pos' : 'stat-neg'}">${free >= 0 ? 'Free: ' + fmt(free) + 'M' : 'Shortfall: ' + fmt(-free) + 'M'}</span>
+              </span>
+            </div>
+            <div class="mil-unit-roster">${rosterHtml}</div>
+            <div class="mil-recruit-form">
+              <select id="rtype_${cmd.id}" class="mil-commander-select">${typeOptsHtml}</select>
+              <input id="rsize_${cmd.id}" type="number" class="mil-commander-alloc" min="1" max="${UNIT_MAX_SIZE}" value="1" style="width:48px">
+              <input id="rname_${cmd.id}" type="text" class="mil-commander-name-input" placeholder="Unit name (optional)" maxlength="30">
+              <button class="mil-add-btn" onclick="recruitUnit('${cmd.id}', document.getElementById('rtype_${cmd.id}').value, document.getElementById('rsize_${cmd.id}').value, document.getElementById('rname_${cmd.id}').value)">+ Recruit</button>
+            </div>
+          </div>`;
+        continue;
+      }
+
+      // ── Navy / Air Force commander: strength + mission + target (unchanged) ──
+      let effStr;
+      if (cmd.branch === 'navy')          effStr = getNavyCommanderEffectiveStrength(cmd).toFixed(1);
+      else if (cmd.branch === 'airForce') effStr = getAirCommanderEffectiveStrength(cmd).toFixed(1);
+      const missionOptsHtml = missionOptions(cmd.branch);
+      const targetOptsHtml  = targetOptions(cmd.branch, cmd.mission);
+      let effectBadge = '';
+      if (cmd.branch === 'navy' && cmd.mission === 'tradeProtection' && cmd.target) {
+        const ctrl = getSeaControlForZone(cmd.target);
+        effectBadge = `<span class="mil-deterrence-badge ${ctrl >= 0.5 ? 'stat-pos' : 'stat-neg'}">→ ${Math.round(ctrl * 100)}% control in ${SEA_PROVINCES[cmd.target]?.name || cmd.target}</span>`;
+      } else if (cmd.branch === 'airForce' && cmd.mission === 'airSuperiority' && cmd.target) {
+        const inRange = isAirMissionInRange('airSuperiority', cmd.target);
+        effectBadge = inRange
+          ? `<span class="mil-deterrence-badge stat-pos">✈️ ${Math.round(getAirCommanderEffectiveStrength(cmd) * AIR_SEA_STRENGTH_FACTOR * 10) / 10} air str → ${SEA_PROVINCES[cmd.target]?.name || cmd.target}</span>`
+          : `<span class="mil-deterrence-badge stat-neg">⚠ Out of range — build Airfield closer</span>`;
+      } else if (cmd.branch === 'airForce' && cmd.mission === 'strategicBombing' && cmd.target) {
+        const inRange = isAirMissionInRange('strategicBombing', cmd.target);
+        effectBadge = inRange
+          ? `<span class="mil-deterrence-badge stat-pos">✈️ Bombing ${NATIONS[cmd.target]?.name} — −${(getAirCommanderEffectiveStrength(cmd) * STRATEGIC_BOMBING_DRAIN).toFixed(3)} mil/turn</span>`
+          : `<span class="mil-deterrence-badge stat-neg">⚠ Out of range — build Airfield closer</span>`;
+      }
+
+      cmdListHtml += `
+        <div class="mil-commander-card">
+          <div class="mil-commander-header">
+            <span class="mil-commander-icon">${icon}</span>
+            <span class="mil-commander-name">${cmd.name}</span>
+            <span class="mil-commander-branch">${branchLbl}</span>
+            ${effectBadge}
+            <button class="mil-commander-remove" onclick="removeCommander('${cmd.id}')">✕</button>
+          </div>
+          <div class="mil-commander-controls">
+            <label class="mil-commander-label">Strength
+              <input type="number" class="mil-commander-alloc" min="0" max="100" value="${cmd.strengthAlloc}"
+                onchange="updateCommanderAlloc('${cmd.id}', this.value)"> %
+            </label>
+            <label class="mil-commander-label">→ ${effStr} effective strength</label>
+            <label class="mil-commander-label">Mission
+              <select id="mis_${cmd.id}" class="mil-commander-select" onchange="updateCommanderMission('${cmd.id}', this.value, document.getElementById('tgt_${cmd.id}')?.value)">
+                ${missionOptsHtml.replace(`value="${cmd.mission}"`, `value="${cmd.mission}" selected`)}
+              </select>
+            </label>
+            <label class="mil-commander-label">Target
+              <select id="tgt_${cmd.id}" class="mil-commander-select" onchange="updateCommanderMission('${cmd.id}', document.getElementById('mis_${cmd.id}')?.value || '${cmd.mission}', this.value)">
+                ${targetOptsHtml.replace(`value="${cmd.target}"`, `value="${cmd.target}" selected`)}
+              </select>
+            </label>
+          </div>
+        </div>`;
+    }
+  }
+
+  // --- Add commander form ---
+  const unlockedBranchOptions = [
+    G.unlockedTechs.includes('standingArmy')        ? `<option value="army">Army ⚔️</option>`      : '',
+    G.unlockedTechs.includes('navalFleet')           ? `<option value="navy">Navy ⚓</option>`      : '',
+    G.unlockedTechs.includes('airForceEstablishment')? `<option value="airForce">Air Force ✈️</option>` : '',
+  ].join('');
+
+  const addFormHtml = unlockedBranchOptions
+    ? `<div class="mil-add-commander">
+        <input id="mil-cmd-name" type="text" class="mil-commander-name-input" placeholder="Commander name…" maxlength="30">
+        <select id="mil-cmd-branch" class="mil-commander-select">${unlockedBranchOptions}</select>
+        <button class="mil-add-btn" onclick="addCommander(document.getElementById('mil-cmd-name').value, document.getElementById('mil-cmd-branch').value); document.getElementById('mil-cmd-name').value='';">+ Assign Commander</button>
+      </div>`
+    : `<div class="mil-supply-note">Unlock military branches to assign commanders.</div>`;
+
+  return `
+    <div class="mil-commanders-section">
+      <div class="mil-panel-header">
+        <span class="mil-panel-title">🎖️ Command Assignments</span>
+        <span class="mil-deterrence-badge">${commanders.length} assigned</span>
+      </div>
+      ${fleetHtml}
+      ${navyUnlocked ? `<div class="mil-sea-zones">${seaZonesHtml}</div>` : ''}
+      <div class="mil-commander-list">${cmdListHtml}</div>
+      ${addFormHtml}
     </div>`;
 }
 
@@ -1423,8 +1653,17 @@ function renderWorldMap() {
     if (!ns || !def) continue;
     const sel    = _mapSelectedNation === nationId ? ' map-region-selected' : '';
     const relCls = ns.relations >= 20 ? ' map-region-friendly' : ns.relations <= -20 ? ' map-region-hostile' : '';
+    const atWarCls = isAtWar(nationId) ? ' map-region-at-war' : '';
     for (const prov of provs) {
-      svg += `<polygon class="map-region${relCls}${sel}" points="${prov.points}" fill="${prov.color}" onclick="selectMapNation('${nationId}')"/>`;
+      // Occupied provinces: render with a distinct overlay instead of nation color
+      if (G.occupiedProvinces?.[prov.id]) {
+        svg += `<polygon class="map-province-occupied" points="${prov.points}" onclick="selectMapNation('${nationId}')"/>`;
+      } else if (G.siegeState?.[prov.id]) {
+        svg += `<polygon class="map-region${relCls}${sel}${atWarCls}" points="${prov.points}" fill="${prov.color}" onclick="selectMapNation('${nationId}')"/>`;
+        svg += `<polygon class="map-province-contested" points="${prov.points}" fill="none" pointer-events="none"/>`;
+      } else {
+        svg += `<polygon class="map-region${relCls}${sel}${atWarCls}" points="${prov.points}" fill="${prov.color}" onclick="selectMapNation('${nationId}')"/>`;
+      }
     }
     // Nation label and capital dot drawn once, centred in nation territory
     svg += `<text class="map-label" x="${def.labelX}" y="${def.labelY}">${def.name}</text>`;
@@ -1445,6 +1684,76 @@ function renderWorldMap() {
   }
   svg += `<text class="map-label map-player-label" x="${PLAYER_MAP.labelX}" y="${PLAYER_MAP.labelY}">${G.empire}</text>`;
   svg += `<circle class="map-capital map-player-capital" cx="${PLAYER_MAP.capitalX}" cy="${PLAYER_MAP.capitalY}" r="4"/>`;
+
+  // --- Trade route paths (drawn last so they appear on top of provinces) ---
+  for (const route of G.tradeRoutes) {
+    const path = getTradeRouteLandPath(route.nationId);
+    if (!path || path.length < 2) continue;
+    const pts = path
+      .map(pid => { const p = PROVINCES[pid]; return p ? `${p.labelX},${p.labelY}` : null; })
+      .filter(Boolean).join(' ');
+    if (!pts) continue;
+    const matAlpha = (0.35 + 0.45 * Math.min(1, route.maturity / TRADE_ROUTE_MATURITY_TURNS)).toFixed(2);
+    const pathEff  = getRoutePathEfficiencyMultiplier(route);
+    const cls      = route.seaZone ? 'map-trade-path map-trade-path-sea' : 'map-trade-path';
+    svg += `<polyline class="${cls}" points="${pts}" stroke-opacity="${matAlpha}" data-eff="${pathEff.toFixed(2)}"/>`;
+    // Tiny efficiency label at midpoint province
+    const midIdx = Math.floor(path.length / 2);
+    const midP   = PROVINCES[path[midIdx]];
+    if (midP && pathEff < 1) {
+      svg += `<text class="map-trade-path-label" x="${midP.labelX}" y="${midP.labelY - 8}">${Math.round(pathEff * 100)}%</text>`;
+    }
+  }
+
+  // --- Staging province highlight (Phase 5.7b) ---
+  // Drawn after player provinces so the glow sits on top of them.
+  const stagingProvinces = getStagingProvinces();
+  for (const provId of stagingProvinces) {
+    const prov = PROVINCES[provId];
+    if (prov) svg += `<polygon class="map-province-staging" points="${prov.points}" fill="none" pointer-events="none"/>`;
+  }
+
+  // --- Unit icons on the map (Phase 5.7b) ---
+  const UNIT_ICON_OFFSETS = [[0,0],[-11,-8],[11,-8],[-11,8],[11,8],[0,-14],[0,14],[-16,0],[16,0]];
+  const unitsByProvince = getProvincesWithPlayerUnits();
+  for (const [provId, entries] of Object.entries(unitsByProvince)) {
+    const prov = PROVINCES[provId];
+    if (!prov) continue;
+    entries.forEach(({ unit }, i) => {
+      const def = UNIT_TYPES[unit.type] || {};
+      const off = UNIT_ICON_OFFSETS[i % UNIT_ICON_OFFSETS.length];
+      svg += `<text class="map-unit-icon" x="${prov.labelX + off[0]}" y="${prov.labelY + off[1]}">${def.icon || '?'}</text>`;
+    });
+    if (entries.length > 1) {
+      svg += `<circle class="map-unit-count-bg" cx="${prov.labelX + 10}" cy="${prov.labelY - 11}" r="7"/>`;
+      svg += `<text class="map-unit-count" x="${prov.labelX + 10}" y="${prov.labelY - 11}">${entries.length}</text>`;
+    }
+  }
+
+  // --- AI unit icons on the map (Phase 5.7c) ---
+  for (const war of (G.wars || [])) {
+    const aiUnits = getProvincesWithAiUnits(war.nationId);
+    for (const [provId, entries] of Object.entries(aiUnits)) {
+      const prov = PROVINCES[provId];
+      if (!prov) continue;
+      entries.forEach(({ unit }, i) => {
+        const def = UNIT_TYPES[unit.type] || {};
+        const off = UNIT_ICON_OFFSETS[i % UNIT_ICON_OFFSETS.length];
+        svg += `<text class="map-ai-unit-icon" x="${prov.labelX + off[0]}" y="${prov.labelY + off[1]}">${def.icon || '?'}</text>`;
+      });
+      if (entries.length > 1) {
+        svg += `<circle class="map-ai-unit-count-bg" cx="${prov.labelX + 10}" cy="${prov.labelY - 11}" r="7"/>`;
+        svg += `<text class="map-ai-unit-count" x="${prov.labelX + 10}" y="${prov.labelY - 11}">${entries.length}</text>`;
+      }
+    }
+  }
+
+  // --- Siege progress labels ---
+  for (const [provId, siege] of Object.entries(G.siegeState || {})) {
+    const prov = PROVINCES[provId];
+    if (!prov) continue;
+    svg += `<text class="map-siege-progress" x="${prov.labelX}" y="${prov.labelY + 14}">${Math.round(siege.progress)}%</text>`;
+  }
 
   // --- Info panel for selected nation OR selected player province ---
   let infoHtml = '';
@@ -1507,6 +1816,7 @@ function renderWorldMap() {
           <div class="map-info-item map-info-item-wide"><div class="map-info-label">Borders</div><div class="map-info-val">${borders}</div></div>
         </div>
         ${tradeHtml}
+        ${_buildWarPanel(id)}
       </div>`;
   }
 
@@ -1535,6 +1845,322 @@ function selectMapProvince(id) {
   _mapSelectedProvince = (_mapSelectedProvince === id) ? null : id;
   _mapSelectedNation = null;
   renderWorldMap();
+}
+
+// ============================================================
+// RESEARCH TAB — visual left-to-right tech tree (Phase 5.7d)
+// ============================================================
+
+// Path → display row (0 = top). Determines the vertical lane in the tree.
+const _TECH_PATH_ROW = {
+  economic:    0,
+  industrial:  1,
+  military:    2,
+  militaryEng: 3,
+  trade:       4,
+  social:      5,
+  science:     6,
+};
+
+const _TECH_PATH_LABELS = {
+  economic:    'Economic',
+  industrial:  'Industrial',
+  military:    'Military',
+  militaryEng: 'Mil. Engineering',
+  trade:       'Trade & Diplomacy',
+  social:      'Social',
+  science:     'Science',
+};
+
+const _TECH_PATH_COLORS = {
+  economic:    '#d4a017',
+  industrial:  '#8b6f47',
+  military:    '#c0392b',
+  militaryEng: '#7f3fbf',
+  trade:       '#1f8c6e',
+  social:      '#2a7abf',
+  science:     '#4a9e4a',
+};
+
+// Compute col (depth) and row for each tech.
+// Column = max depth of prerequisite chain. Row = path row.
+// Collisions (same col+row) are resolved by small vertical offsets.
+function _computeTechTreeLayout() {
+  const depthCache = {};
+  function getDepth(techId) {
+    if (techId in depthCache) return depthCache[techId];
+    const tech = TECHNOLOGIES[techId];
+    if (!tech || !tech.requires || tech.requires.length === 0) {
+      return (depthCache[techId] = 0);
+    }
+    return (depthCache[techId] = Math.max(...tech.requires.map(getDepth)) + 1);
+  }
+
+  const rawPos = {};
+  for (const techId of Object.keys(TECHNOLOGIES)) {
+    const tech = TECHNOLOGIES[techId];
+    rawPos[techId] = {
+      col: getDepth(techId),
+      row: _TECH_PATH_ROW[tech.path] ?? 4,
+    };
+  }
+
+  // Resolve collisions: spread same-(col,row) techs vertically
+  const buckets = {};
+  for (const [id, pos] of Object.entries(rawPos)) {
+    const key = `${pos.col},${pos.row}`;
+    (buckets[key] = buckets[key] || []).push(id);
+  }
+
+  const positions = {};
+  for (const ids of Object.values(buckets)) {
+    const n = ids.length;
+    ids.forEach((id, i) => {
+      positions[id] = {
+        col: rawPos[id].col,
+        row: rawPos[id].row + (i - (n - 1) / 2) * 0.55,
+      };
+    });
+  }
+  return positions;
+}
+
+function _buildResearchTab(rp, ceiling) {
+  const NODE_W  = 152;
+  const NODE_H  = 78;
+  const COL_W   = 192;  // column stride
+  const ROW_H   = 108;  // row stride (base)
+  const PAD_X   = 16;
+  const PAD_Y   = 20;
+  const LABEL_W = 118;
+
+  const positions = _computeTechTreeLayout();
+
+  // Compute canvas size
+  let maxCol = 0;
+  let maxRowFrac = 0;
+  for (const pos of Object.values(positions)) {
+    if (pos.col > maxCol) maxCol = pos.col;
+    if (pos.row > maxRowFrac) maxRowFrac = pos.row;
+  }
+  const canvasW = (maxCol + 1) * COL_W + PAD_X * 2;
+  const canvasH = Math.ceil(maxRowFrac + 1) * ROW_H + PAD_Y * 2 + 20;
+
+  // Helper: pixel coords for node left-midpoint and right-midpoint
+  const nodeX   = (pos) => PAD_X + pos.col * COL_W;
+  const nodeY   = (pos) => PAD_Y + pos.row * ROW_H;
+  const midY    = (pos) => nodeY(pos) + NODE_H / 2;
+
+  // Build SVG connection lines
+  let svgLines = '';
+  for (const [techId, tech] of Object.entries(TECHNOLOGIES)) {
+    for (const reqId of (tech.requires || [])) {
+      const from = positions[reqId];
+      const to   = positions[techId];
+      if (!from || !to) continue;
+      const x1 = nodeX(from) + NODE_W;
+      const y1 = midY(from);
+      const x2 = nodeX(to);
+      const y2 = midY(to);
+      const cx = (x1 + x2) / 2;
+      const unlocked = G.unlockedTechs.includes(reqId) && G.unlockedTechs.includes(techId);
+      const available = G.unlockedTechs.includes(reqId) && !G.unlockedTechs.includes(techId);
+      const cls = unlocked ? 'tt-line tt-line-done' : available ? 'tt-line tt-line-avail' : 'tt-line';
+      svgLines += `<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}" class="${cls}"/>`;
+    }
+  }
+
+  // Build tech nodes
+  let nodes = '';
+  for (const [id, tech] of Object.entries(TECHNOLOGIES)) {
+    const pos = positions[id];
+    if (!pos) continue;
+    const x = nodeX(pos);
+    const y = nodeY(pos);
+    const unlocked  = G.unlockedTechs.includes(id);
+    const isActive  = G.activeResearch === id;
+    const isQueued  = (G.techQueue || []).includes(id);
+    const reqMet    = (tech.requires || []).every(r => G.unlockedTechs.includes(r));
+    const available = !unlocked && reqMet && !isActive;
+    const locked    = !unlocked && !reqMet && !isActive;
+    const cost      = getTechCost(id);
+    const color     = _TECH_PATH_COLORS[tech.path] || '#888';
+
+    let cls = 'tt-node';
+    if (unlocked)       cls += ' tt-done';
+    else if (isActive)  cls += ' tt-active';
+    else if (isQueued)  cls += ' tt-queued';
+    else if (locked)    cls += ' tt-locked';
+    else                cls += ' tt-avail';
+
+    const progressPct = isActive
+      ? Math.min(100, (G.researchProgress / cost) * 100)
+      : 0;
+
+    const queueIdx   = isQueued ? (G.techQueue.indexOf(id) + 1) : 0;
+    const turnsLabel = (!unlocked && rp > 0)
+      ? '~' + getTurnsToComplete(id) + 't'
+      : '';
+
+    const progressBar = isActive
+      ? `<div class="tt-progress-bar" style="width:${progressPct.toFixed(1)}%"></div>`
+      : '';
+
+    const badge = unlocked    ? '<span class="tt-badge tt-badge-done">✓</span>'
+      : isActive  ? `<span class="tt-badge tt-badge-active">${progressPct.toFixed(0)}%</span>`
+      : isQueued  ? `<span class="tt-badge tt-badge-queue">#${queueIdx}</span>`
+      : '';
+
+    const onclick = (unlocked || isActive)
+      ? (isActive ? `cancelResearch()` : '')
+      : `enqueueTech('${id}')`;
+
+    nodes += `
+      <div class="${cls}" style="left:${x}px;top:${y}px;width:${NODE_W}px;height:${NODE_H}px;border-color:${color}"
+           title="${tech.description}${locked ? '\n⚠ Requires: ' + (tech.requires || []).map(r => TECHNOLOGIES[r]?.name || r).join(', ') : ''}"
+           ${onclick ? `onclick="${onclick}"` : ''}>
+        ${progressBar ? `<div class="tt-progress-track">${progressBar}</div>` : ''}
+        <div class="tt-node-body">
+          <span class="tt-icon">${tech.icon}</span>
+          <div class="tt-text">
+            <div class="tt-name">${tech.name}</div>
+            <div class="tt-cost">${unlocked ? 'Researched' : isActive ? 'In Progress' : cost + ' RP' + (turnsLabel ? ' · ' + turnsLabel : '')}</div>
+          </div>
+          ${badge}
+        </div>
+      </div>`;
+  }
+
+  // Path lane labels (left side, fixed column)
+  let laneLabels = '';
+  const usedRows = new Set(Object.values(_TECH_PATH_ROW));
+  for (const [path, row] of Object.entries(_TECH_PATH_ROW)) {
+    if (!usedRows.has(row)) continue;
+    const y = PAD_Y + row * ROW_H + NODE_H / 2 - 10;
+    const color = _TECH_PATH_COLORS[path] || '#888';
+    laneLabels += `<div class="tt-lane-label" style="top:${y}px;color:${color}">${_TECH_PATH_LABELS[path]}</div>`;
+  }
+
+  // Queue panel
+  const activeId   = G.activeResearch;
+  const activeTech = activeId ? TECHNOLOGIES[activeId] : null;
+  const queue      = G.techQueue || [];
+  const activePct  = activeTech
+    ? Math.min(100, (G.researchProgress / getTechCost(activeId)) * 100).toFixed(1)
+    : 0;
+  const activeTurns = activeTech ? getTurnsToComplete(activeId) : null;
+
+  let queueRows = '';
+  for (let i = 0; i < queue.length; i++) {
+    const t = TECHNOLOGIES[queue[i]];
+    if (!t) continue;
+    const prereqMet = (t.requires || []).every(r => G.unlockedTechs.includes(r) || queue.slice(0, i).includes(r));
+    queueRows += `
+      <div class="tt-queue-row ${prereqMet ? '' : 'tt-queue-warn'}" title="${prereqMet ? '' : 'Prerequisites may not be met by the time this is reached'}">
+        <span class="tt-queue-num">#${i + 1}</span>
+        <span class="tt-queue-icon">${t.icon}</span>
+        <span class="tt-queue-name">${t.name}</span>
+        <span class="tt-queue-cost">${getTechCost(queue[i])} RP</span>
+        <button class="tt-queue-btn" onclick="moveQueueUp('${queue[i]}')" title="Move up" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button class="tt-queue-btn" onclick="moveQueueDown('${queue[i]}')" title="Move down" ${i === queue.length - 1 ? 'disabled' : ''}>▼</button>
+        <button class="tt-queue-btn tt-queue-remove" onclick="dequeueTech('${queue[i]}')" title="Remove">✕</button>
+      </div>`;
+  }
+
+  const queuePanel = `
+    <div class="tt-queue-panel">
+      <div class="tt-queue-header">Research Queue</div>
+      <div class="tt-queue-active">
+        <div class="tt-queue-active-label">Now Researching</div>
+        ${activeTech
+          ? `<div class="tt-queue-active-name">${activeTech.icon} ${activeTech.name}</div>
+             <div class="tt-queue-active-bar-track"><div class="tt-queue-active-bar" style="width:${activePct}%"></div></div>
+             <div class="tt-queue-active-detail">${activePct}% &nbsp;·&nbsp; ${isFinite(activeTurns) ? '~' + activeTurns + ' turns' : '—'}</div>
+             <button class="btn-small btn-neg" onclick="cancelResearch()">Cancel</button>`
+          : '<div class="tt-queue-active-empty">Nothing active — click a tech to queue it.</div>'
+        }
+      </div>
+      <div class="tt-queue-list">
+        ${queueRows || '<div class="tt-queue-empty">Queue is empty</div>'}
+      </div>
+      <div class="tt-queue-footer">
+        <span>RP/turn: +${rp.toFixed(1)}</span>
+        <span>Research: ${G.researchLevel.toFixed(1)} / ${ceiling}</span>
+      </div>
+    </div>`;
+
+  return `
+    <div class="tt-layout">
+      <div class="tt-scroll-wrapper">
+        <div class="tt-lane-labels" style="height:${canvasH}px">${laneLabels}</div>
+        <div class="tt-scroll-area">
+          <div class="tt-canvas" style="width:${canvasW}px;height:${canvasH}px">
+            <svg class="tt-svg" width="${canvasW}" height="${canvasH}">${svgLines}</svg>
+            ${nodes}
+          </div>
+        </div>
+      </div>
+      ${queuePanel}
+    </div>`;
+}
+
+// War section shown in the nation info panel (Phase 5.7c).
+function _buildWarPanel(nationId) {
+  const atWar = isAtWar(nationId);
+  if (!atWar) {
+    return `<div class="map-war-section">
+      <button class="map-declare-war-btn" onclick="declareWar('${nationId}')">⚔️ Declare War</button>
+    </div>`;
+  }
+  const war        = G.wars.find(w => w.nationId === nationId);
+  const occupied   = getPlayerOccupiedProvincesOf(nationId);
+  const total      = getNationProvinces(nationId).length;
+  const aiMil      = G.aiMilitary[nationId];
+  const aiStrength = (aiMil?.commanders || []).flatMap(c => c.units || [])
+    .filter(u => u.status === 'ready').reduce((s, u) => s + u.size, 0);
+  const sueLabel   = war?.sueForPeaceOffered ? '<span class="map-sue-badge">🏳️ Requesting Peace</span>' : '';
+  return `<div class="map-war-section map-war-active">
+    <div class="map-war-header">⚔️ AT WAR — Turn ${war?.declaredTurn || '?'}${sueLabel}</div>
+    <div class="map-war-stats">
+      Occupied: ${occupied.length}/${total} provinces &nbsp;|&nbsp; Enemy units: ${aiStrength}
+    </div>
+    <button class="map-peace-btn" onclick="openPeaceDeal('${nationId}')">🤝 Offer Peace Deal</button>
+  </div>`;
+}
+
+// Open the peace deal modal for a nation currently at war.
+function openPeaceDeal(nationId) {
+  const occupied = getPlayerOccupiedProvincesOf(nationId);
+  let rowsHtml = '';
+  if (occupied.length === 0) {
+    rowsHtml = '<div class="peace-no-provinces">No provinces currently occupied.</div>';
+  } else {
+    for (const provId of occupied) {
+      const name = PROVINCES[provId]?.name || provId;
+      rowsHtml += `<label class="peace-province-row">
+        <input type="checkbox" class="peace-prov-check" value="${provId}" checked> ${name}
+      </label>`;
+    }
+  }
+  const modal = document.createElement('div');
+  modal.id = 'peace-deal-modal';
+  modal.className = 'peace-modal-overlay';
+  modal.innerHTML = `
+    <div class="peace-modal">
+      <div class="peace-modal-title">Peace Deal with ${NATIONS[nationId]?.name}</div>
+      <div class="peace-modal-subtitle">Select provinces to annex. Unchecked provinces are returned.</div>
+      <div class="peace-province-list">${rowsHtml}</div>
+      <div class="peace-modal-actions">
+        <button class="btn-primary" onclick="
+          const checks = document.querySelectorAll('.peace-prov-check:checked');
+          const keep = Array.from(checks).map(c => c.value);
+          document.getElementById('peace-deal-modal').remove();
+          offerPeace('${nationId}', keep);
+        ">Sign Peace Deal</button>
+        <button class="btn-secondary" onclick="document.getElementById('peace-deal-modal').remove()">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
 }
 
 function _buildProvincePanel(provinceId) {
@@ -1577,6 +2203,8 @@ function _buildProvincePanel(provinceId) {
       <div class="map-info-grid">
         <div class="map-info-item"><div class="map-info-label">Infra</div><div class="map-info-val">${prov.infraLevel}/3</div></div>
         <div class="map-info-item"><div class="map-info-label">Coastal</div><div class="map-info-val">${prov.coastal ? '✓ Yes' : '✗ No'}</div></div>
+        <div class="map-info-item"><div class="map-info-label">Supply</div><div class="map-info-val ${getProvinceSupplyLevel(provinceId) >= 0.9 ? 'stat-pos' : getProvinceSupplyLevel(provinceId) >= 0.7 ? '' : 'stat-neg'}">${Math.round(getProvinceSupplyLevel(provinceId) * 100)}%</div></div>
+        <div class="map-info-item"><div class="map-info-label">Capital dist</div><div class="map-info-val">${provinceId === getCapitalProvinceId() ? '★ Capital' : bfsMinHops([getCapitalProvinceId()], [provinceId]) + ' hop' + (bfsMinHops([getCapitalProvinceId()], [provinceId]) !== 1 ? 's' : '')}</div></div>
       </div>
       <div class="prov-install-section">
         ${existingHtml}

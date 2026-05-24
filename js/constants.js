@@ -77,6 +77,69 @@ const INSTALLATION_TYPES = {
 };
 const INSTALLATION_BUILD_COST_SCALE = 0.5;  // +50% build cost per existing same type in same province
 
+// Merchant fleet (Phase 5.4)
+// Fleet grows each turn from active trade routes + Commerce level investment.
+// Fleet level caps total trade throughput: income multiplied down if volume > capacity.
+// Growth = activeRoutes × MERCHANT_FLEET_ROUTE_GROW + commerceLevel × MERCHANT_FLEET_COMMERCE_GROW
+const MERCHANT_FLEET_ROUTE_GROW     = 0.5;   // fleet levels gained per active route per turn
+const MERCHANT_FLEET_COMMERCE_GROW  = 0.05;  // fleet levels gained per Commerce level point per turn
+const MERCHANT_FLEET_DECAY_RATE     = 0.3;   // fleet levels lost per turn (obsolescence)
+const MERCHANT_FLEET_BASE_CEILING   = 50;    // max fleet level without Merchant Shipping project
+const MERCHANT_FLEET_CAPACITY_PER_LEVEL = 2.0; // $M/turn trade capacity per fleet level
+
+// Sea control (Phase 5.4)
+// Enemy navy strength in a sea zone comes from AI nations that border that zone.
+// Naval Base staging bonus: commander patrolling a zone with an adjacent Naval Base gets bonus strength.
+const NAVY_PRESENCE_FACTOR       = 0.05;  // AI nation militaryLevel × this = enemy navy strength in adjacent zone
+const NAVAL_BASE_STAGING_BONUS   = 0.30;  // +30% commander effective strength when adjacent Naval Base exists
+
+// Air Force operations (Phase 5.5)
+// Fighters provide air superiority — their strength counts toward sea zone or province control.
+// Bombers conduct strategic bombing — slowly drains target nation militaryLevel.
+// Range is measured in province-adjacency hops from the nearest player Airfield.
+const AIR_SUPERIORITY_RANGE       = 4;     // hops from Airfield to sea-zone coastal province
+const STRATEGIC_BOMBING_RANGE     = 6;     // hops from Airfield to target nation province
+const AIR_SEA_STRENGTH_FACTOR     = 0.5;   // air superiority strength counts as 0.5× navy for sea control
+const STRATEGIC_BOMBING_DRAIN     = 0.002; // militaryLevel drained per effective strength per turn
+
+// Province-level routing (Phase 5.6)
+// Trade routes pass through intermediate provinces; their infra quality can only penalise income.
+// Supply flows from the capital outward; each province hop loses a fraction of delivery efficiency.
+const ROUTE_PATH_INFRA_REFERENCE  = 5;    // infraLevel at or above this = no penalty (multiplier 1.0)
+const SUPPLY_DISTANCE_DECAY       = 0.10; // fraction of supply lost per province hop from capital
+
+// Ground unit system (Phase 5.7a)
+// Max unit size the player can recruit in a single order.
+const UNIT_MAX_SIZE = 20;
+// If a commander's total unit upkeep exceeds their budget, units are "underfunded".
+// Underfunded units' effective combat power is reduced in 5.7c; here it only triggers a warning.
+const UNIT_UNDERFUND_WARNING_THRESHOLD = 0.01; // M/turn shortfall before a warning fires
+
+// Ground unit movement (Phase 5.7b)
+// turnsPerHop = ceil(UNIT_MOVEMENT_BASE_TURNS / unitSpeed)
+// Speed values from UNIT_TYPES range 1 (Artillery) to 8 (Recon), giving:
+//   Recon/speed-8  → 1 turn/hop   Artillery/speed-1 → 6 turns/hop
+const UNIT_MOVEMENT_BASE_TURNS = 6;
+
+// War & siege constants (Phase 5.7c)
+// Siege progress: net (attack - defense) is divided by this to get % change per turn.
+// e.g. net=100 with divisor=10 → 10% progress per turn → capture in ~10 turns if unchallenged.
+const SIEGE_PROGRESS_DIVISOR         = 10;
+// Fraction of unit size lost per turn when outgunned (applied proportionally).
+const SIEGE_CASUALTY_RATE            = 0.04;
+// Treasury drain per active war per turn (M gold).
+const WAR_TREASURY_DRAIN_PER_TURN    = 5;
+// Happiness penalty subtracted from target while at war, per active war.
+const WAR_HAPPINESS_PENALTY          = 8;
+// Base unit size per province when initialising AI militaries.
+const AI_UNIT_SIZE_PER_PROVINCE      = 8;
+// Minimum total AI attack strength before a commander attempts to counter-attack.
+const AI_COUNTER_ATTACK_THRESHOLD    = 20;
+// Fraction of a nation's provinces that must be occupied before they request peace.
+const SUE_FOR_PEACE_THRESHOLD        = 0.6;
+// Attack bonus (multiplicative) if player had forces staged at the border when war was declared.
+const STAGING_ATTACK_BONUS           = 0.25;
+
 // Trade routes
 const TRADE_ROUTE_MATURITY_TURNS       = 50;    // turns for route to reach full maturity
 

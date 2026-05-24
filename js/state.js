@@ -9,7 +9,7 @@ function initGame(empireName) {
     empire: empireName || 'New Empire',
     year: 2024,
     turn: 1,
-    treasury: -100,
+    treasury: 100000,
     gdp: POPULATION_START * GDP_PER_CAPITA_START / 1000,  // derived: population × gdpPerCapita / 1000
     gdpGrowthRate: 0.00,   // base per-capita productivity growth rate (policies/techs add to this)
     population: POPULATION_START,      // millions
@@ -22,6 +22,7 @@ function initGame(empireName) {
     happiness: 50,
     activeResearch: null,
     researchProgress: 0,
+    techQueue: [],       // ordered list of techIds queued for auto-research (Phase 5.7d)
 
     // Economic sector levels (0–100), built by spending on corresponding policies
     miningLevel: 10,
@@ -91,6 +92,34 @@ function initGame(empireName) {
     // Province installations (Phase 5.3) — [{ type: 'airfield'|'navalBase', provinceId: string }]
     installations: [],
 
+    // Commanders (Phase 5.4) — strategic directive assignments for each military branch.
+    // Navy/Air Force shape: { id, name, branch, strengthAlloc: 0–100, mission, target }
+    //   strengthAlloc = % of that branch's level dedicated to this commander.
+    //   Navy missions: 'tradeProtection' (target: sea zone ID)
+    //   Air Force missions: 'airSuperiority' | 'strategicBombing' (target: sea zone or nation ID)
+    // Army shape (Phase 5.7a): { id, name, branch:'army', budget: M/turn, nextUnitId, units: [] }
+    //   budget = M gold/turn authorised for this commander; units drawn from UNIT_TYPES.
+    //   Unit shape: { id, name, type, size, status:'recruiting'|'ready', recruitTurnsLeft }
+    commanders: [],
+    nextCommanderId: 1,
+
+    // Active wars (Phase 5.7c) — [{ nationId, declaredTurn, stagingBonus, sueForPeaceOffered }]
+    wars: [],
+    // Per-province siege state — { [provId]: { progress: 0-100 } }
+    // Exists only while a siege is in progress; deleted on capture or peace.
+    siegeState: {},
+    // Player-occupied enemy provinces (taken in combat, not yet formally annexed).
+    // { [provId]: { originalOwner: nationId } }
+    occupiedProvinces: {},
+    // AI military — mirrored commander+unit structure per nation.
+    // { [nationId]: { commanders: [ same shape as player Army commanders ] } }
+    aiMilitary: {},
+
+    // Merchant fleet (Phase 5.4) — civilian transport capacity.
+    // Grows each turn from active trade routes + Commerce level; decays slowly.
+    // Caps total trade throughput: income is scaled down if volume exceeds fleet capacity.
+    merchantFleet: 0,
+
     // Resource types unlocked via Industrial path techs (used by Phase 3.5 deposits)
     // Iron and Coal are always discoverable (no tech required).
     unlockedResources: [],
@@ -153,5 +182,6 @@ function initGame(empireName) {
     currentDashboardTab: 'overview',
   };
 
+  initAiMilitaries(); // Phase 5.7c: populate AI army rosters from nation province counts
   renderAll();
 }
