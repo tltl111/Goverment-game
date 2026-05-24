@@ -2755,6 +2755,18 @@ section {
 .mil-unit-disband:hover   { border-color: #c0392b; color: #e74c3c; }
 .mil-recruit-form         { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid var(--border); }
 .mil-unit-pos             { font-size: 10px; color: var(--text-3); flex-shrink: 0; }
+.mil-budget-free          { font-size: 11px; }
+.mil-commander-budget-row { display: flex; align-items: center; gap: 10px; padding: 4px 0 6px; flex-wrap: wrap; }
+
+/* Production Queue (Phase 5.7f) */
+.mil-prodqueue-section    { margin-top: 16px; padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; }
+.mil-prodqueue-row        { display: flex; align-items: center; gap: 6px; padding: 3px 6px; background: var(--bg-3); border-radius: 4px; font-size: 11px; margin-top: 4px; }
+
+/* Commander Assessments (Phase 5.7f) */
+.mil-assessments-section  { margin-top: 12px; padding: 10px 12px; background: var(--bg-2); border: 1px solid #4a3800; border-radius: 6px; }
+.mil-assessment-row       { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.mil-assessment-row:last-child { border-bottom: none; }
+.mil-assessment-reason    { flex: 1; font-size: 12px; color: var(--text-1); line-height: 1.4; }
 
 /* Commander order row (Phase 5.7b) */
 .mil-army-order-row   { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
@@ -2819,3 +2831,27 @@ section {
 .peace-modal-actions      { display: flex; gap: 8px; }
 .peace-modal-actions .btn-primary   { flex: 1; }
 .peace-modal-actions .btn-secondary { flex: 1; background: none; border: 1px solid var(--border); color: var(--text-2); border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+
+/* ── Equipment Design tab (Phase 5.7e) ───────────────────────────────────────── */
+.equip-panel              { display: flex; flex-direction: column; gap: 12px; padding: 8px 0; }
+.equip-tier-legend        { font-size: 11px; color: var(--text-3); padding: 6px 10px; background: var(--bg-3); border-radius: 6px; border: 1px solid var(--border); }
+.equip-cards-grid         { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.equip-card               { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; transition: border-color 0.2s; }
+.equip-card.refitting     { border-color: var(--yellow); }
+.equip-card-header        { display: flex; align-items: center; justify-content: space-between; }
+.equip-unit-name          { font-size: 13px; font-weight: 700; color: var(--text-1); }
+.equip-tier-badge         { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+.equip-tier-badge.tier-base { background: var(--bg-3); color: var(--text-2); border: 1px solid var(--border); }
+.equip-tier-badge.tier-mid  { background: rgba(59,130,246,0.15); color: var(--blue); border: 1px solid var(--blue); }
+.equip-tier-badge.tier-max  { background: rgba(234,179,8,0.15); color: var(--yellow); border: 1px solid var(--yellow); }
+.equip-stat-row           { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--text-2); }
+.equip-stat               { white-space: nowrap; }
+.equip-refit-progress     { font-size: 12px; color: var(--yellow); background: rgba(234,179,8,0.08); border: 1px solid rgba(234,179,8,0.3); border-radius: 4px; padding: 4px 8px; }
+.equip-next-tier          { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-top: 1px solid var(--border); }
+.equip-max-tier           { font-size: 12px; color: var(--green); }
+.equip-next-label         { font-size: 12px; font-weight: 600; color: var(--text-1); }
+.equip-next-stats         { font-size: 11px; color: var(--text-3); }
+.equip-upgrade-btn        { margin-top: 4px; background: var(--blue); color: #fff; border: none; border-radius: 4px; padding: 5px 10px; font-size: 12px; cursor: pointer; align-self: flex-start; transition: opacity 0.15s; }
+.equip-upgrade-btn:hover  { opacity: 0.85; }
+.equip-upgrade-btn.disabled, .equip-upgrade-btn:disabled { background: var(--bg-3); color: var(--text-3); cursor: not-allowed; opacity: 1; border: 1px solid var(--border); }
+.equip-locked-reason      { font-size: 11px; color: var(--text-3); font-style: italic; }

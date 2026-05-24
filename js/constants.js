@@ -47,12 +47,14 @@ const EDUCATION_HAPPINESS_MAX    = 10;    // happiness contribution at education
 const EDUCATION_GDP_GROWTH_MAX   = 0.015; // GDP growth bonus at educationLevel 100
 const EDUCATION_RP_BONUS_MAX     = 3;     // RP/centre bonus at educationLevel 100
 
-// Military branches (Phase 5.1)
+// Military branches (Phase 5.1 / 5.7f)
 // getDeterrenceRating() returns a 0–100 weighted score (army 50%, navy 25%, air 25%).
 // Army strength is further manpower-gated by population × MILITARY_MANPOWER_RATIO.
-const ARMY_STRENGTH_MAX      = 30;   // army contribution to deterrence at armyLevel 100 (manpower-gated)
-const NAVY_STRENGTH_MAX      = 10;   // navy contribution to deterrence at navyLevel 100
-const AIRFORCE_STRENGTH_MAX  = 10;   // air force contribution to deterrence at airForceLevel 100
+// Navy and Air Force strength (Phase 5.7f) is derived from recruitable unit rosters,
+// not from policy levels.  NAVY/AIRFORCE_STRENGTH_MAX are display/normalisation caps.
+const ARMY_STRENGTH_MAX      = 30;   // army deterrence cap (unit-attack / ARMY_DETERRENCE_ATTACK_SCALE)
+const NAVY_STRENGTH_MAX      = 25;   // navy deterrence cap (unit-attack / NAVY_DETERRENCE_ATTACK_SCALE)
+const AIRFORCE_STRENGTH_MAX  = 25;   // air deterrence cap  (unit-attack / AIR_DETERRENCE_ATTACK_SCALE)
 const ARMY_HAPPINESS_PENALTY = 3;    // happiness penalty at armyLevel 100
 
 // Manufacturing import cost: paid per turn when Manufacturing level exceeds Mining level
@@ -253,3 +255,27 @@ const DEPOSIT_UPGRADE_SUCCESS     = 0.25;  // 25% success chance when upgrade pr
 const DEPOSIT_PROGRESS_DECAY      = 2.0;   // % per turn, for in-progress (unfunded) deposits
 // Max-tier distribution weights for newly detected anomalies:
 const DEPOSIT_MAX_TIER_WEIGHTS    = [35, 30, 20, 10, 5]; // occurrence / vein / deposit / reserve / majorReserve
+
+// Equipment Design (Phase 5.7e)
+// Refit cost = max(BASE_REFIT_COST, totalUnitSizesOfType × costPerSize × FRACTION)
+const EQUIPMENT_REFIT_COST_FRACTION  = 0.40;  // fraction of recruitment cost per size unit
+const EQUIPMENT_REFIT_BASE_COST      = 50;    // minimum refit cost ($M) with no existing units
+const EQUIPMENT_REFIT_TURNS_PER_TIER = 5;     // turns per single tier jump (Mk.I→Mk.II = 5 turns)
+// Army deterrence: sum of ready unit effective attack power / this = army's 0→ARMY_STRENGTH_MAX contribution
+const ARMY_DETERRENCE_ATTACK_SCALE   = 10;    // attack-power divisor for deterrence normalisation
+// Navy/Air deterrence (Phase 5.7f): total unit attack / scale = contribution (0 → STRENGTH_MAX)
+const NAVY_DETERRENCE_ATTACK_SCALE   = 5;     // total naval attack ÷ 5 = navy strength (capped at 25)
+const AIR_DETERRENCE_ATTACK_SCALE    = 5;     // total air attack ÷ 5 = air strength   (capped at 25)
+// Army happiness penalty: min(ARMY_HAPPINESS_PENALTY, totalReadyUnitSizes × PER_SIZE)
+const ARMY_HAPPINESS_PER_UNIT_SIZE   = 0.05;  // happiness penalty per total unit-size in service
+
+// Production queue (Phase 5.7f)
+// All naval and air unit production goes through a global queue.
+// Only one item is actively produced at a time.  Supply shortfall slows production.
+const PRODUCTION_SUPPLY_SLOW_THRESHOLD = 0.5;  // if supplyRatio < this, production speed = supplyRatio
+
+// Commander assessments (Phase 5.7f)
+// Semi-automatic brain: each commander posts one recommendation per interval if no pending one exists.
+const COMMANDER_ASSESSMENT_INTERVAL   = 3;     // turns between assessment regeneration per commander
+const COMMANDER_ASSESS_RECRUIT_THRESHOLD = 20; // recommend recruit if total ready attack < this
+const COMMANDER_ASSESS_BUDGET_THRESHOLD  = 5;  // recommend budget increase if shortfall > this M/turn

@@ -79,36 +79,6 @@ const POLICIES = {
     maxFunding: 20,
     effects: {}
   },
-  army: {
-    id: 'army',
-    name: 'Army',
-    category: 'security',
-    icon: '⚔️',
-    description: 'Fund ground forces. Builds Army level, increasing deterrence and negotiation leverage. Army strength is soft-capped by population (manpower). High Army levels have a small happiness cost.',
-    maxFunding: 20,
-    requiresTech: 'standingArmy',
-    effects: {}
-  },
-  navy: {
-    id: 'navy',
-    name: 'Navy',
-    category: 'security',
-    icon: '⚓',
-    description: 'Fund naval forces. Builds Navy level, contributing to deterrence and protecting trade routes at sea.',
-    maxFunding: 20,
-    requiresTech: 'navalFleet',
-    effects: {}
-  },
-  airForce: {
-    id: 'airForce',
-    name: 'Air Force',
-    category: 'security',
-    icon: '✈️',
-    description: 'Fund air forces. Builds Air Force level, contributing to deterrence. Requires advanced manufacturing capability.',
-    maxFunding: 20,
-    requiresTech: 'airForceEstablishment',
-    effects: {}
-  },
   research: {
     id: 'research',
     name: 'Research',
@@ -482,18 +452,18 @@ const TECHNOLOGIES = {
   navalFleet: {
     id: 'navalFleet', name: 'Naval Fleet',
     tier: 2, path: 'military', cost: 80, icon: '⚓',
-    description: 'Commission a standing naval fleet. Unlocks the Navy policy.',
+    description: 'Commission a standing naval fleet. Unlocks Navy commanders and naval unit recruitment.',
     requires: ['standingArmy'],
-    unlocks: { policies: ['navy'] },
-    effects: { effectDesc: 'Unlocks Navy policy' }
+    unlocks: {},
+    effects: { effectDesc: 'Unlocks Navy commanders' }
   },
   airForceEstablishment: {
     id: 'airForceEstablishment', name: 'Air Force',
     tier: 3, path: 'military', cost: 160, icon: '✈️',
-    description: 'Establish an air force branch. Requires mass production capability. Unlocks the Air Force policy.',
+    description: 'Establish an air force branch. Requires mass production capability. Unlocks Air Force commanders and air unit recruitment.',
     requires: ['navalFleet', 'massProduction'],
-    unlocks: { policies: ['airForce'] },
-    effects: { effectDesc: 'Unlocks Air Force policy' }
+    unlocks: {},
+    effects: { effectDesc: 'Unlocks Air Force commanders' }
   },
 
   // ============================================================
@@ -738,8 +708,21 @@ const TECHNOLOGIES = {
     description: 'Advanced materials research directly supports the military engineering programme, reducing equipment refit costs.',
     requires: ['quantumComputing', 'basicMetallurgy'],
     unlocks: null,
-    effects: { effectDesc: '−20% equipment refit cost (Phase 5.7e)' }
+    effects: { equipmentRefitCostMult: 0.80, effectDesc: '−20% equipment refit cost' }
   },
+};
+
+// ============================================================
+// EQUIPMENT TIERS — Phase 5.7e
+// Each tier multiplies unit attack and defense stats, and adds speed.
+// Tier 1 (Mk.I) is the baseline — all units start here.
+// Tier 2 (Mk.II) requires advancedMetallurgy tech.
+// Tier 3 (Mk.III) requires compositeArmour tech.
+// ============================================================
+const EQUIPMENT_TIERS = {
+  1: { name: 'Mk.I',   attackMult: 1.00, defenseMult: 1.00, speedBonus: 0, requiresTech: null },
+  2: { name: 'Mk.II',  attackMult: 1.40, defenseMult: 1.35, speedBonus: 1, requiresTech: 'advancedMetallurgy' },
+  3: { name: 'Mk.III', attackMult: 1.80, defenseMult: 1.70, speedBonus: 2, requiresTech: 'compositeArmour' },
 };
 
 // ============================================================
@@ -1446,5 +1429,152 @@ const UNIT_TYPES = {
     defense:       5,
     speed:         3,
     armorPiercingBonus: 4,  // added to attack specifically against armoredCorps
+  },
+};
+
+// ============================================================
+// NAVAL UNIT TYPES — Phase 5.7f
+// ============================================================
+// Used by Navy commanders. Effective strength = Σ(attack × size) per ready unit.
+// fleetMultiplierBonus (Carrier): multiplies the total attack of all other units in the same commander.
+// blockadeBonus (Submarine): adds to attack specifically for offensivePatrol / blockade missions.
+const NAVAL_UNIT_TYPES = {
+  destroyer: {
+    name:          'Destroyer',
+    icon:          '🚢',
+    description:   'Fast anti-submarine escort. Cheap and versatile; excels at convoy protection and sea patrol.',
+    costPerSize:   15,
+    upkeepPerSize: 2,
+    productionTurns: 3,
+    attack:        3,
+    defense:       4,
+    speed:         8,
+  },
+  frigate: {
+    name:          'Frigate',
+    icon:          '⛵',
+    description:   'Multi-role warship. Balanced offensive and defensive capability at moderate cost.',
+    costPerSize:   25,
+    upkeepPerSize: 4,
+    productionTurns: 4,
+    attack:        5,
+    defense:       5,
+    speed:         6,
+  },
+  cruiser: {
+    name:          'Cruiser',
+    icon:          '⚓',
+    description:   'Heavy surface combatant. Strong firepower; effective at area denial and force projection.',
+    costPerSize:   50,
+    upkeepPerSize: 8,
+    productionTurns: 5,
+    attack:        8,
+    defense:       6,
+    speed:         4,
+  },
+  battleship: {
+    name:          'Battleship',
+    icon:          '🛳️',
+    description:   'Capital warship. Immense firepower and resilience; slow to build but dominates any engagement.',
+    costPerSize:   120,
+    upkeepPerSize: 18,
+    productionTurns: 8,
+    attack:        15,
+    defense:       12,
+    speed:         2,
+  },
+  submarine: {
+    name:          'Submarine',
+    icon:          '🤿',
+    description:   'Stealth underwater predator. Highly effective at interdicting enemy trade and supply lines.',
+    costPerSize:   35,
+    upkeepPerSize: 6,
+    productionTurns: 5,
+    attack:        10,
+    defense:       2,
+    speed:         4,
+    blockadeBonus: 0.5,   // +50% effective attack on offensivePatrol / blockade missions
+  },
+  carrier: {
+    name:          'Carrier',
+    icon:          '🛥️',
+    description:   'Mobile naval air base. Extends air operations over sea zones and multiplies the effectiveness of accompanying fleet units.',
+    costPerSize:   200,
+    upkeepPerSize: 25,
+    productionTurns: 10,
+    attack:        5,
+    defense:       8,
+    speed:         3,
+    fleetMultiplierBonus: 0.20,  // +20% to all other units\' attack within the same commander
+  },
+};
+
+// ============================================================
+// AIR UNIT TYPES — Phase 5.7f
+// ============================================================
+// Used by Air Force commanders.
+// missionBonus: multiplier applied to (attack × size) for each mission type.
+// reconBonus: flat multiplier bonus to the whole commander\' effective strength (stacks additively).
+const AIR_UNIT_TYPES = {
+  fighter: {
+    name:          'Fighter Squadron',
+    icon:          '🛩️',
+    description:   'Air superiority fighters. Dominate contested airspace and intercept enemy aircraft.',
+    costPerSize:   20,
+    upkeepPerSize: 3,
+    productionTurns: 3,
+    attack:        6,
+    defense:       4,
+    speed:         10,
+    missionBonus:  { airSuperiority: 1.0, strategicBombing: 0.2, airLogistics: 0.0 },
+  },
+  groundAttack: {
+    name:          'Ground Attack Squadron',
+    icon:          '💣',
+    description:   'Tactical close air support. Effective against ground positions and medium-value strategic targets.',
+    costPerSize:   25,
+    upkeepPerSize: 4,
+    productionTurns: 4,
+    attack:        5,
+    defense:       2,
+    speed:         7,
+    missionBonus:  { airSuperiority: 0.4, strategicBombing: 0.6, airLogistics: 0.0 },
+  },
+  strategicBomber: {
+    name:          'Strategic Bomber Squadron',
+    icon:          '✈️',
+    description:   'Long-range heavy bombers. Strikes enemy infrastructure and industrial capacity from strategic depth.',
+    costPerSize:   40,
+    upkeepPerSize: 7,
+    productionTurns: 5,
+    attack:        4,
+    defense:       2,
+    speed:         5,
+    missionBonus:  { airSuperiority: 0.1, strategicBombing: 1.0, airLogistics: 0.0 },
+  },
+  transport: {
+    name:          'Transport Squadron',
+    icon:          '🚁',
+    description:   'Military cargo aircraft. Sustains air logistics operations, boosting supply delivery to assigned provinces.',
+    costPerSize:   15,
+    upkeepPerSize: 2,
+    productionTurns: 2,
+    attack:        0,
+    defense:       1,
+    speed:         6,
+    missionBonus:  { airSuperiority: 0.0, strategicBombing: 0.0, airLogistics: 1.0 },
+  },
+  reconSpy: {
+    name:          'Recon Squadron',
+    icon:          '🔭',
+    description:   'Intelligence-gathering aircraft. Provides targeting data that boosts the effectiveness of other squadrons.',
+    costPerSize:   18,
+    upkeepPerSize: 3,
+    productionTurns: 2,
+    attack:        2,
+    defense:       2,
+    speed:         9,
+    missionBonus:  { airSuperiority: 0.4, strategicBombing: 0.3, airLogistics: 0.3 },
+    reconBonus:    0.10,  // +10% to the commander's total effective strength
   },
 };

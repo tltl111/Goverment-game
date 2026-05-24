@@ -206,6 +206,18 @@ function renderTabBar() {
       btnMilitary.textContent = '\uD83D\uDD12 Military';
     }
   }
+
+  const btnEquipment = document.getElementById('tab-btn-equipment');
+  if (btnEquipment) {
+    const hasEquipment = G.unlockedTechs.includes('basicMetallurgy');
+    if (hasEquipment) {
+      btnEquipment.classList.remove('tab-btn-locked');
+      btnEquipment.textContent = '\u2699\uFE0F Equipment';
+    } else {
+      btnEquipment.classList.add('tab-btn-locked');
+      btnEquipment.textContent = '\uD83D\uDD12 Equipment';
+    }
+  }
 }
 
 function updateBudgetProjection() {
@@ -333,8 +345,8 @@ function buildEffectsHint(policyId) {
     healthcare:      [['↑ Healthcare level', 'good'], ['↑ pop growth', 'good'], ['↑ happiness', 'good']],
     education:       [['↑ Education level', 'good'], ['↑ GDP growth', 'good'], ['↑ research speed', 'good'], ['↑ happiness', 'good']],
     army:            [['↑ Army level', 'good'], ['↑ deterrence', 'good'], ['↑ leverage', 'good'], ['↓ happiness', 'bad'], ['pop-capped', 'neutral']],
-    navy:            [['↑ Navy level', 'good'], ['↑ deterrence', 'good'], ['protects trade', 'good']],
-    airForce:        [['↑ Air Force level', 'good'], ['↑ deterrence', 'good']],
+    navy:            [['↑ unit-based Navy', 'good'], ['↑ deterrence', 'good'], ['protects trade', 'good']],
+    airForce:        [['↑ unit-based Air Force', 'good'], ['↑ deterrence', 'good']],
     research:        [['↑ Research level', 'good'], ['↑ RP/turn', 'good'], ['↑ tech speed', 'good']],
   };
   return (tags[policyId] || [])
@@ -407,9 +419,8 @@ function renderDashboard() {
       { label: 'Research Output',   value: '+' + rp.toFixed(1),      unit: ' RP/turn', max: 100, rawPct: Math.min(100, rp * 3), type: rp === 0 ? 'warn' : 'pos' },
       { label: 'Active Research',   value: activeResearchName, unit: '', max: 100, rawPct: activeResearchPct, type: G.activeResearch ? 'pos' : 'warn' },
       { label: 'Deterrence Rating', value: getDeterrenceRating().toFixed(0) + '/100', unit: ' (strength ' + Math.round(getTotalMilitaryStrength()) + ')', max: 100, rawPct: getDeterrenceRating(), type: getDeterrenceRating() === 0 ? 'warn' : 'pos' },
-      { label: 'Army Level',        value: Math.round(G.armyLevel) + '/100', unit: ' (manpower cap ' + Math.round(G.population * MILITARY_MANPOWER_RATIO) + ')', max: 100, rawPct: G.armyLevel, type: G.armyLevel === 0 ? 'warn' : 'pos' },
-      { label: 'Navy Level',        value: Math.round(G.navyLevel) + '/100', unit: '', max: 100, rawPct: G.navyLevel, type: G.navyLevel === 0 ? 'warn' : 'pos' },
-      { label: 'Air Force Level',   value: Math.round(G.airForceLevel) + '/100', unit: '', max: 100, rawPct: G.airForceLevel, type: G.airForceLevel === 0 ? 'warn' : 'pos' },
+      { label: 'Navy Strength',     value: getNavyStrength().toFixed(1) + '/' + NAVY_STRENGTH_MAX, unit: '', max: NAVY_STRENGTH_MAX, rawPct: getNavyStrength() / NAVY_STRENGTH_MAX * 100, type: getNavyStrength() === 0 ? 'warn' : 'pos' },
+      { label: 'Air Force Strength',value: getAirForceStrength().toFixed(1) + '/' + AIRFORCE_STRENGTH_MAX, unit: '', max: AIRFORCE_STRENGTH_MAX, rawPct: getAirForceStrength() / AIRFORCE_STRENGTH_MAX * 100, type: getAirForceStrength() === 0 ? 'warn' : 'pos' },
     ];
 
     const barClass = t => t === 'neg' ? 'bar-red' : t === 'warn' ? 'bar-yellow' : 'bar-green';
@@ -523,6 +534,10 @@ function renderDashboard() {
     renderMilitary();
   }
 
+  if (tab === 'equipment') {
+    renderEquipment();
+  }
+
   if (tab === 'statistics') {
     const h = G.history;
     const noData = h.length === 0;
@@ -566,9 +581,7 @@ function renderDashboard() {
       { label: 'Finance',        key: 'financeLevel',        color: 'var(--green)',  fmt: v => v.toFixed(1) + '/100' },
       { label: 'Healthcare',     key: 'healthcareLevel',     color: 'var(--red)',    fmt: v => v.toFixed(1) + '/100' },
       { label: 'Education',      key: 'educationLevel',      color: 'var(--blue)',   fmt: v => v.toFixed(1) + '/100' },
-      { label: 'Army',           key: 'armyLevel',            color: 'var(--orange)', fmt: v => v.toFixed(1) + '/100' },
-      { label: 'Navy',           key: 'navyLevel',            color: 'var(--teal)',   fmt: v => v.toFixed(1) + '/100' },
-      { label: 'Air Force',      key: 'airForceLevel',        color: 'var(--blue)',   fmt: v => v.toFixed(1) + '/100' },
+      { label: 'Deterrence',    key: 'deterrenceRating',    color: 'var(--blue)',   fmt: v => v.toFixed(1) + '/100' },
       { label: 'Research',       key: 'researchLevel',        color: 'var(--teal)',   fmt: v => v.toFixed(1) + '/' + getResearchCapacityCeiling() },
     ];
     let sectorRows = '';
@@ -1070,8 +1083,6 @@ function renderMilitary() {
   const airStr           = getAirForceStrength();
   const totalStr         = getTotalMilitaryStrength();
   const manpowerCap      = G.population * MILITARY_MANPOWER_RATIO;
-  const manpowerPct      = Math.min(100, (G.armyLevel / 100 * ARMY_STRENGTH_MAX / manpowerCap) * 100);
-  const manpowerLimited  = (ARMY_STRENGTH_MAX * (G.armyLevel / 100)) > manpowerCap;
 
   const goodsProduced  = getGoodsProduced();
   const deliveryEff    = getGoodsDeliveryEff();
@@ -1097,53 +1108,76 @@ function renderMilitary() {
         <div class="mil-branch-locked-msg">Research <strong>${requiresTechName}</strong> to unlock.</div>
       </div>`;
     }
-    const funding   = G.policyFunding[fundingKey] || 0;
-    const costM     = getEffectivePolicyCost(fundingKey);
-    const levelPct  = level.toFixed(1);
-    const strPct    = (strength / maxStrength * 100).toFixed(0);
-    const fmtCost   = funding > 0 ? '−' + fmt(costM) + '/turn' : 'Inactive';
+    const strPct = (strength / maxStrength * 100).toFixed(0);
+    const cmdrs  = (G.commanders || []).filter(c => c.branch === fundingKey);
+    const unitCount = cmdrs.reduce((s, c) => s + (c.units || []).length, 0);
+    const budgetTotal = cmdrs.reduce((s, c) => s + (c.budget || 0), 0);
     return `<div class="mil-branch-card">
       <div class="mil-branch-header">
         <span class="mil-branch-icon">${icon}</span>
         <span class="mil-branch-name">${name}</span>
-        <span class="mil-branch-status ${funding > 0 ? 'active' : 'inactive'}">${funding > 0 ? 'Funded' : 'Unfunded'}</span>
+        <span class="mil-branch-status ${unitCount > 0 ? 'active' : 'inactive'}">${unitCount > 0 ? unitCount + ' unit' + (unitCount !== 1 ? 's' : '') : 'No units'}</span>
       </div>
       <div class="mil-branch-stats">
-        <div class="mil-stat-row">
-          <span class="mil-stat-label">Level</span>
-          <span class="mil-stat-value">${levelPct} / 100</span>
-        </div>
-        <div class="mil-bar-bg"><div class="mil-bar-fill" style="width:${levelPct}%"></div></div>
         <div class="mil-stat-row">
           <span class="mil-stat-label">Strength</span>
           <span class="mil-stat-value">${strength.toFixed(1)} / ${maxStrength}</span>
         </div>
+        <div class="mil-bar-bg"><div class="mil-bar-fill" style="width:${strPct}%"></div></div>
         <div class="mil-stat-row">
-          <span class="mil-stat-label">Funding</span>
-          <span class="mil-stat-value ${funding > 0 ? '' : 'stat-neg'}">${funding}% of income — ${fmtCost}</span>
+          <span class="mil-stat-label">Commander Budget</span>
+          <span class="mil-stat-value">${fmt(budgetTotal)}M/turn allocated</span>
         </div>
       </div>
-      <div class="mil-branch-hint">Adjust funding via the <strong>Security</strong> tab in the Policy panel.</div>
+      <div class="mil-branch-hint">Manage units and budgets in <strong>Commanders</strong> below.</div>
     </div>`;
   }
 
-  const armyCard = branchCard(
-    'Army', '⚔️', G.armyLevel, armyStr, ARMY_STRENGTH_MAX,
-    armyUnlocked, 'Standing Army', 'army'
-  );
+  const armyCard = (() => {
+    if (!armyUnlocked) {
+      return `<div class="mil-branch-card mil-branch-locked">
+        <div class="mil-branch-header">
+          <span class="mil-branch-icon">⚔️</span>
+          <span class="mil-branch-name">Army</span>
+          <span class="mil-branch-status locked">🔒 Locked</span>
+        </div>
+        <div class="mil-branch-locked-msg">Research <strong>Standing Army</strong> to unlock.</div>
+      </div>`;
+    }
+    const tierNames = Object.values(G.equipmentTiers || {});
+    const avgTier = tierNames.length ? (tierNames.reduce((s, t) => s + t, 0) / tierNames.length).toFixed(1) : '1.0';
+    const strPct  = (armyStr / ARMY_STRENGTH_MAX * 100).toFixed(0);
+    const activeRefit = (G.activeRefits || []).length > 0;
+    return `<div class="mil-branch-card">
+      <div class="mil-branch-header">
+        <span class="mil-branch-icon">⚔️</span>
+        <span class="mil-branch-name">Army</span>
+        <span class="mil-branch-status ${activeRefit ? 'active' : 'inactive'}">${activeRefit ? '⚙️ Refitting' : 'Ready'}</span>
+      </div>
+      <div class="mil-branch-stats">
+        <div class="mil-stat-row">
+          <span class="mil-stat-label">Strength</span>
+          <span class="mil-stat-value">${armyStr.toFixed(1)} / ${ARMY_STRENGTH_MAX}</span>
+        </div>
+        <div class="mil-bar-bg"><div class="mil-bar-fill" style="width:${strPct}%"></div></div>
+        <div class="mil-stat-row">
+          <span class="mil-stat-label">Avg. Equipment Tier</span>
+          <span class="mil-stat-value">Mk.${avgTier}</span>
+        </div>
+      </div>
+      <div class="mil-branch-hint">Manage units in <strong>Commanders</strong> below. Upgrade equipment in the <strong>⚙️ Equipment</strong> tab.</div>
+    </div>`;
+  })();
   const navyCard = branchCard(
-    'Navy', '⚓', G.navyLevel, navyStr, NAVY_STRENGTH_MAX,
+    'Navy', '⚓', null, navyStr, NAVY_STRENGTH_MAX,
     navyUnlocked, 'Naval Fleet', 'navy'
   );
   const airCard  = branchCard(
-    'Air Force', '✈️', G.airForceLevel, airStr, AIRFORCE_STRENGTH_MAX,
+    'Air Force', '✈️', null, airStr, AIRFORCE_STRENGTH_MAX,
     airForceUnlocked, 'Air Force', 'airForce'
   );
 
   const deterClass = deterrence >= 60 ? 'stat-pos' : deterrence >= 30 ? 'effect-neutral' : 'stat-neg';
-  const manpowerNote = manpowerLimited
-    ? `<span class="stat-neg"> (manpower-limited — grow population to raise Army strength beyond ${manpowerCap.toFixed(0)})</span>`
-    : '';
 
   el.innerHTML = `
     <div class="mil-panel">
@@ -1157,7 +1191,7 @@ function renderMilitary() {
           <span class="mil-stat-value">${totalStr.toFixed(1)} / ${ARMY_STRENGTH_MAX + NAVY_STRENGTH_MAX + AIRFORCE_STRENGTH_MAX}</span>
         </div>
         <div class="mil-bar-bg"><div class="mil-bar-fill mil-bar-deterrence" style="width:${deterrence.toFixed(0)}%"></div></div>
-        <div class="mil-deterrence-hint">Deterrence = Army 50% + Navy 25% + Air Force 25%${manpowerNote}</div>
+        <div class="mil-deterrence-hint">Deterrence = Army 50% + Navy 25% + Air Force 25%</div>
       </div>
       <div class="mil-supply-section">
         <div class="mil-panel-header">
@@ -1190,6 +1224,127 @@ function renderMilitary() {
         ${navyCard}
         ${airCard}
       </div>
+    </div>`;
+}
+
+// ── Equipment Design tab (Phase 5.7e) ─────────────────────────────────────────────────────
+function renderEquipment() {
+  const el = document.getElementById('tab-equipment');
+  if (!el) return;
+
+  const basicUnlocked = G.unlockedTechs.includes('basicMetallurgy');
+  if (!basicUnlocked) {
+    el.innerHTML = `
+      <div class="diplo-locked">
+        <div class="diplo-locked-icon">⚙️</div>
+        <div class="diplo-locked-title">Equipment Design</div>
+        <div class="diplo-locked-msg">Research <strong>Basic Metallurgy</strong> to unlock the Equipment Design screen.</div>
+      </div>`;
+    return;
+  }
+
+  const tierKeys = Object.keys(EQUIPMENT_TIERS).map(Number).sort((a, b) => a - b);
+
+  let cardsHtml = '';
+  for (const [typeId, typeDef] of Object.entries(UNIT_TYPES)) {
+    const currentTier  = G.equipmentTiers?.[typeId] || 1;
+    const currentTierDef = EQUIPMENT_TIERS[currentTier];
+    const activeRefit  = (G.activeRefits || []).find(r => r.unitType === typeId);
+    const inService    = getUnitTypeInServiceSizes(typeId);
+    const atkEff       = getEffectiveUnitAttack(typeId);
+    const defEff       = getEffectiveUnitDefense(typeId);
+    const spdEff       = getEffectiveUnitSpeed(typeId);
+
+    // Next available tier
+    const nextTier = currentTier < 3 ? currentTier + 1 : null;
+    const nextTierDef = nextTier ? EQUIPMENT_TIERS[nextTier] : null;
+    const nextUnlocked = nextTier
+      ? (!nextTierDef.requiresTech || G.unlockedTechs.includes(nextTierDef.requiresTech))
+      : false;
+
+    // Stats preview for next tier (base × nextMult × same tech bonuses)
+    const te = getTechEffects();
+    let nextAtkPreview = '', nextDefPreview = '';
+    if (nextTierDef) {
+      let aMult = nextTierDef.attackMult * (1 + te.unitAttackBonus);
+      let dMult = nextTierDef.defenseMult * (1 + te.unitDefenseBonus);
+      if (typeId === 'armoredCorps' || typeId === 'mechanizedInfantry') {
+        aMult *= (1 + te.mechanisedCombatBonus);
+        dMult *= (1 + te.mechanisedCombatBonus);
+      }
+      nextAtkPreview = (typeDef.attack * aMult).toFixed(1);
+      nextDefPreview = (typeDef.defense * dMult).toFixed(1);
+    }
+
+    const refitCost  = nextTier ? getRefitCost(typeId, nextTier) : 0;
+    const refitTurns = nextTier ? getRefitTurns(currentTier, nextTier) : 0;
+
+    const canUpgrade = nextTier && nextUnlocked && !activeRefit && G.treasury >= refitCost && inService > 0;
+    const btnDisabled = !canUpgrade;
+    let btnReason = '';
+    if (nextTier && !nextUnlocked) {
+      btnReason = `Requires ${TECHNOLOGIES[nextTierDef.requiresTech]?.name}`;
+    } else if (activeRefit) {
+      btnReason = `Refit in progress (${activeRefit.turnsLeft} turns left)`;
+    } else if (inService === 0) {
+      btnReason = 'No units in service';
+    } else if (nextTier && G.treasury < refitCost) {
+      btnReason = `Need ${fmt(refitCost)}M`;
+    } else if (!nextTier) {
+      btnReason = 'Max tier';
+    }
+
+    const tierBadgeClass = currentTier === 3 ? 'equip-tier-badge tier-max'
+                         : currentTier === 2 ? 'equip-tier-badge tier-mid'
+                         : 'equip-tier-badge tier-base';
+
+    const refitProgressHtml = activeRefit
+      ? `<div class="equip-refit-progress">⚙️ Refitting to ${EQUIPMENT_TIERS[activeRefit.targetTier].name} — ${activeRefit.turnsLeft} turn${activeRefit.turnsLeft !== 1 ? 's' : ''} left</div>`
+      : '';
+
+    const nextTierHtml = nextTierDef
+      ? `<div class="equip-next-tier">
+          <span class="equip-next-label">Next: ${nextTierDef.name}</span>
+          <span class="equip-next-stats">ATK ${nextAtkPreview} · DEF ${nextDefPreview} · SPD ${spdEff - currentTierDef.speedBonus + nextTierDef.speedBonus}</span>
+          ${nextUnlocked
+            ? `<button class="equip-upgrade-btn${btnDisabled ? ' disabled' : ''}" ${btnDisabled ? 'disabled' : `onclick="orderRefit('${typeId}', ${nextTier})"`}>
+                Refit → ${nextTierDef.name} (${fmt(refitCost)}M · ${refitTurns} turns)
+               </button>`
+            : `<span class="equip-locked-reason">🔒 ${btnReason}</span>`
+          }
+          ${btnDisabled && nextUnlocked ? `<span class="equip-locked-reason">${btnReason}</span>` : ''}
+        </div>`
+      : `<div class="equip-next-tier equip-max-tier">✓ Maximum tier reached</div>`;
+
+    cardsHtml += `
+      <div class="equip-card${activeRefit ? ' refitting' : ''}">
+        <div class="equip-card-header">
+          <span class="equip-unit-name">${typeDef.icon || '🪖'} ${typeDef.name}</span>
+          <span class="${tierBadgeClass}">${currentTierDef.name}</span>
+        </div>
+        <div class="equip-stat-row">
+          <span class="equip-stat">⚔️ ATK <strong>${atkEff.toFixed(1)}</strong></span>
+          <span class="equip-stat">🛡️ DEF <strong>${defEff.toFixed(1)}</strong></span>
+          <span class="equip-stat">💨 SPD <strong>${spdEff}</strong></span>
+          <span class="equip-stat">🪖 In service: <strong>${inService}</strong></span>
+        </div>
+        ${refitProgressHtml}
+        ${nextTierHtml}
+      </div>`;
+  }
+
+  el.innerHTML = `
+    <div class="equip-panel">
+      <div class="mil-panel-header">
+        <span class="mil-panel-title">⚙️ Equipment Design</span>
+        <span class="mil-deterrence-badge">Manage unit equipment tiers</span>
+      </div>
+      <div class="equip-tier-legend">
+        <strong>Mk.I</strong> — Baseline · 
+        <strong>Mk.II</strong> — Requires Advanced Metallurgy (+40% ATK, +35% DEF, +1 SPD) · 
+        <strong>Mk.III</strong> — Requires Composite Armour (+80% ATK, +70% DEF, +2 SPD)
+      </div>
+      <div class="equip-cards-grid">${cardsHtml}</div>
     </div>`;
 }
 
@@ -1306,6 +1461,7 @@ function _buildCommandersSection() {
     return [
       `<option value="airSuperiority">Air Superiority</option>`,
       `<option value="strategicBombing">Strategic Bombing</option>`,
+      `<option value="airLogistics">Air Logistics</option>`,
     ].join('');
   }
 
@@ -1327,6 +1483,11 @@ function _buildCommandersSection() {
         return Object.entries(NATIONS)
           .filter(([id]) => id !== 'player')
           .map(([id, n]) => `<option value="${id}">${n.name}</option>`).join('');
+      }
+      if (mission === 'airLogistics') {
+        return Object.entries(PROVINCES)
+          .filter(([, p]) => p.nationId === 'player')
+          .map(([id, p]) => `<option value="${id}">${p.name}</option>`).join('');
       }
     }
     return `<option value="">N/A</option>`;
@@ -1447,55 +1608,96 @@ function _buildCommandersSection() {
         continue;
       }
 
-      // ── Navy / Air Force commander: strength + mission + target (unchanged) ──
-      let effStr;
-      if (cmd.branch === 'navy')          effStr = getNavyCommanderEffectiveStrength(cmd).toFixed(1);
-      else if (cmd.branch === 'airForce') effStr = getAirCommanderEffectiveStrength(cmd).toFixed(1);
-      const missionOptsHtml = missionOptions(cmd.branch);
-      const targetOptsHtml  = targetOptions(cmd.branch, cmd.mission);
-      let effectBadge = '';
-      if (cmd.branch === 'navy' && cmd.mission === 'tradeProtection' && cmd.target) {
-        const ctrl = getSeaControlForZone(cmd.target);
-        effectBadge = `<span class="mil-deterrence-badge ${ctrl >= 0.5 ? 'stat-pos' : 'stat-neg'}">→ ${Math.round(ctrl * 100)}% control in ${SEA_PROVINCES[cmd.target]?.name || cmd.target}</span>`;
-      } else if (cmd.branch === 'airForce' && cmd.mission === 'airSuperiority' && cmd.target) {
-        const inRange = isAirMissionInRange('airSuperiority', cmd.target);
-        effectBadge = inRange
-          ? `<span class="mil-deterrence-badge stat-pos">✈️ ${Math.round(getAirCommanderEffectiveStrength(cmd) * AIR_SEA_STRENGTH_FACTOR * 10) / 10} air str → ${SEA_PROVINCES[cmd.target]?.name || cmd.target}</span>`
-          : `<span class="mil-deterrence-badge stat-neg">⚠ Out of range — build Airfield closer</span>`;
-      } else if (cmd.branch === 'airForce' && cmd.mission === 'strategicBombing' && cmd.target) {
-        const inRange = isAirMissionInRange('strategicBombing', cmd.target);
-        effectBadge = inRange
-          ? `<span class="mil-deterrence-badge stat-pos">✈️ Bombing ${NATIONS[cmd.target]?.name} — −${(getAirCommanderEffectiveStrength(cmd) * STRATEGIC_BOMBING_DRAIN).toFixed(3)} mil/turn</span>`
-          : `<span class="mil-deterrence-badge stat-neg">⚠ Out of range — build Airfield closer</span>`;
-      }
+      // ── Navy / Air Force commander: unit roster + mission/target directive (Phase 5.7f) ──
+      {
+        const typeDefs = cmd.branch === 'navy' ? NAVAL_UNIT_TYPES : AIR_UNIT_TYPES;
+        const upkeep   = getNavalAirCommanderUnitUpkeep(cmd);
+        const free     = (cmd.budget || 0) - upkeep;
+        const units    = cmd.units || [];
 
-      cmdListHtml += `
-        <div class="mil-commander-card">
-          <div class="mil-commander-header">
-            <span class="mil-commander-icon">${icon}</span>
-            <span class="mil-commander-name">${cmd.name}</span>
-            <span class="mil-commander-branch">${branchLbl}</span>
-            ${effectBadge}
-            <button class="mil-commander-remove" onclick="removeCommander('${cmd.id}')">✕</button>
-          </div>
-          <div class="mil-commander-controls">
-            <label class="mil-commander-label">Strength
-              <input type="number" class="mil-commander-alloc" min="0" max="100" value="${cmd.strengthAlloc}"
-                onchange="updateCommanderAlloc('${cmd.id}', this.value)"> %
-            </label>
-            <label class="mil-commander-label">→ ${effStr} effective strength</label>
-            <label class="mil-commander-label">Mission
-              <select id="mis_${cmd.id}" class="mil-commander-select" onchange="updateCommanderMission('${cmd.id}', this.value, document.getElementById('tgt_${cmd.id}')?.value)">
-                ${missionOptsHtml.replace(`value="${cmd.mission}"`, `value="${cmd.mission}" selected`)}
-              </select>
-            </label>
-            <label class="mil-commander-label">Target
-              <select id="tgt_${cmd.id}" class="mil-commander-select" onchange="updateCommanderMission('${cmd.id}', document.getElementById('mis_${cmd.id}')?.value || '${cmd.mission}', this.value)">
-                ${targetOptsHtml.replace(`value="${cmd.target}"`, `value="${cmd.target}" selected`)}
-              </select>
-            </label>
-          </div>
-        </div>`;
+        // Mission effect badge
+        const missionOptsHtml = missionOptions(cmd.branch);
+        const targetOptsHtml  = targetOptions(cmd.branch, cmd.mission);
+        let effectBadge = '';
+        if (cmd.branch === 'navy' && cmd.mission === 'tradeProtection' && cmd.target) {
+          const ctrl = getSeaControlForZone(cmd.target);
+          effectBadge = `<span class="mil-deterrence-badge ${ctrl >= 0.5 ? 'stat-pos' : 'stat-neg'}">→ ${Math.round(ctrl * 100)}% control in ${SEA_PROVINCES[cmd.target]?.name || cmd.target}</span>`;
+        } else if (cmd.branch === 'airForce' && cmd.mission === 'airSuperiority' && cmd.target) {
+          const inRange = isAirMissionInRange('airSuperiority', cmd.target);
+          effectBadge = inRange
+            ? `<span class="mil-deterrence-badge stat-pos">✈️ ${Math.round(getAirCommanderEffectiveStrength(cmd) * AIR_SEA_STRENGTH_FACTOR * 10) / 10} air str → ${SEA_PROVINCES[cmd.target]?.name || cmd.target}</span>`
+            : `<span class="mil-deterrence-badge stat-neg">⚠ Out of range — build Airfield closer</span>`;
+        } else if (cmd.branch === 'airForce' && cmd.mission === 'strategicBombing' && cmd.target) {
+          const inRange = isAirMissionInRange('strategicBombing', cmd.target);
+          effectBadge = inRange
+            ? `<span class="mil-deterrence-badge stat-pos">✈️ Bombing ${NATIONS[cmd.target]?.name} — −${(getAirCommanderEffectiveStrength(cmd) * STRATEGIC_BOMBING_DRAIN).toFixed(3)} mil/turn</span>`
+            : `<span class="mil-deterrence-badge stat-neg">⚠ Out of range — build Airfield closer</span>`;
+        } else if (cmd.branch === 'airForce' && cmd.mission === 'airLogistics' && cmd.target) {
+          const inRange = isAirMissionInRange('airLogistics', cmd.target);
+          const bonus   = getAirLogisticsSupplyBonus(cmd.target);
+          effectBadge = inRange
+            ? `<span class="mil-deterrence-badge stat-pos">✈️ +${(bonus * 100).toFixed(1)}% supply bonus → ${PROVINCES[cmd.target]?.name || cmd.target}</span>`
+            : `<span class="mil-deterrence-badge stat-neg">⚠ Out of range — build Airfield closer</span>`;
+        }
+
+        // Unit roster rows
+        let unitRows = units.length === 0
+          ? `<div class="mil-unit-row"><em>No units — queue production below.</em></div>`
+          : units.map(u => {
+              const def = typeDefs[u.type];
+              const icon2 = def?.icon || '•';
+              const statusLabel = u.status === 'ready' ? '✅ Ready' : '🏭 Building';
+              return `<div class="mil-unit-row">
+                <span class="mil-unit-icon">${icon2}</span>
+                <span class="mil-unit-name">${u.name}</span>
+                <span class="mil-unit-size">×${u.size}</span>
+                <span class="mil-unit-status">${statusLabel}</span>
+                <button class="mil-unit-disband" onclick="disbandUnit('${cmd.id}', '${u.id}')">✕</button>
+              </div>`;
+            }).join('');
+
+        // Recruit (queue) form
+        const typeOpts = Object.entries(typeDefs)
+          .map(([k, d]) => `<option value="${k}">${d.icon || ''} ${d.name} (×1: ${fmt(d.costPerSize)}M, ${d.productionTurns}t)</option>`)
+          .join('');
+
+        cmdListHtml += `
+          <div class="mil-commander-card">
+            <div class="mil-commander-header">
+              <span class="mil-commander-icon">${icon}</span>
+              <span class="mil-commander-name">${cmd.name}</span>
+              <span class="mil-commander-branch">${branchLbl}</span>
+              ${effectBadge}
+              <button class="mil-commander-remove" onclick="removeCommander('${cmd.id}')">✕</button>
+            </div>
+            <div class="mil-commander-budget-row">
+              <label class="mil-commander-label">Budget (M/turn)
+                <input type="number" class="mil-commander-alloc" min="0" step="1" value="${cmd.budget || 0}"
+                  onchange="setCommanderBudget('${cmd.id}', this.value)">
+              </label>
+              <span class="mil-budget-free ${free < 0 ? 'stat-neg' : 'stat-pos'}">Upkeep: ${fmt(upkeep)}M — ${free >= 0 ? fmt(free) + 'M free' : fmt(-free) + 'M shortfall'}</span>
+            </div>
+            <div class="mil-commander-controls">
+              <label class="mil-commander-label">Mission
+                <select id="mis_${cmd.id}" class="mil-commander-select" onchange="updateCommanderMission('${cmd.id}', this.value, document.getElementById('tgt_${cmd.id}')?.value)">
+                  ${missionOptsHtml.replace(`value="${cmd.mission}"`, `value="${cmd.mission}" selected`)}
+                </select>
+              </label>
+              <label class="mil-commander-label">Target
+                <select id="tgt_${cmd.id}" class="mil-commander-select" onchange="updateCommanderMission('${cmd.id}', document.getElementById('mis_${cmd.id}')?.value || '${cmd.mission}', this.value)">
+                  ${targetOptsHtml.replace(`value="${cmd.target}"`, `value="${cmd.target}" selected`)}
+                </select>
+              </label>
+            </div>
+            <div class="mil-unit-list">${unitRows}</div>
+            <div class="mil-recruit-form">
+              <select id="qtype_${cmd.id}" class="mil-commander-select">${typeOpts}</select>
+              <label class="mil-commander-label">Size <input id="qsize_${cmd.id}" type="number" class="mil-commander-alloc" min="1" max="${UNIT_MAX_SIZE}" value="1"></label>
+              <input id="qname_${cmd.id}" type="text" class="mil-commander-name-input" placeholder="Unit name (optional)" maxlength="30">
+              <button class="mil-add-btn" onclick="queueProductionItem('${cmd.id}', document.getElementById('qtype_${cmd.id}').value, document.getElementById('qsize_${cmd.id}').value, document.getElementById('qname_${cmd.id}').value)">+ Queue</button>
+            </div>
+          </div>`;
+      }
     }
   }
 
@@ -1524,7 +1726,59 @@ function _buildCommandersSection() {
       ${navyUnlocked ? `<div class="mil-sea-zones">${seaZonesHtml}</div>` : ''}
       <div class="mil-commander-list">${cmdListHtml}</div>
       ${addFormHtml}
+      ${renderProductionQueueHtml()}
+      ${renderCommanderAssessmentsHtml()}
     </div>`;
+}
+
+function renderProductionQueueHtml() {
+  const queue = G.productionQueue || [];
+  if (queue.length === 0) return '';
+  let rows = queue.map((item, idx) => {
+    const typeDefs = item.branch === 'navy' ? NAVAL_UNIT_TYPES : AIR_UNIT_TYPES;
+    const def = typeDefs[item.unitType];
+    const cmd = (G.commanders || []).find(c => c.id === item.commanderId);
+    const cmdName = cmd ? cmd.name : '?';
+    const progress = item.turnsTotal > 0
+      ? Math.round((1 - item.turnsLeft / item.turnsTotal) * 100) : 100;
+    const statusLabel = idx === 0 ? `🏭 Building — ${Math.ceil(item.turnsLeft)}t left` : `⏳ Queued — ${item.turnsLeft}t`;
+    return `<div class="mil-prodqueue-row">
+      <span class="mil-unit-icon">${def?.icon || '•'}</span>
+      <span class="mil-unit-name">${item.unitName} (×${item.size})</span>
+      <span class="mil-unit-size">${cmdName}</span>
+      <span class="mil-unit-status">${statusLabel}</span>
+      ${idx === 0
+        ? `<div class="mil-bar-bg" style="width:80px;display:inline-block"><div class="mil-bar-fill mil-bar-deterrence" style="width:${progress}%"></div></div>`
+        : ''}
+      <button class="mil-unit-disband" onclick="cancelProductionItem('${item.id}')">✕</button>
+    </div>`;
+  }).join('');
+  return `<div class="mil-prodqueue-section">
+    <div class="mil-panel-header">
+      <span class="mil-panel-title">🏭 Production Queue</span>
+      <span class="mil-deterrence-badge">${queue.length} item${queue.length !== 1 ? 's' : ''}</span>
+    </div>
+    ${rows}
+  </div>`;
+}
+
+function renderCommanderAssessmentsHtml() {
+  const assessments = G.commanderAssessments || [];
+  if (assessments.length === 0) return '';
+  const rows = assessments.map(a => {
+    return `<div class="mil-assessment-row">
+      <span class="mil-assessment-reason">${a.reason}</span>
+      <button class="mil-add-btn" onclick="acceptAssessment('${a.id}')">Accept</button>
+      <button class="mil-unit-disband" onclick="dismissAssessment('${a.id}')">Dismiss</button>
+    </div>`;
+  }).join('');
+  return `<div class="mil-assessments-section">
+    <div class="mil-panel-header">
+      <span class="mil-panel-title">📋 Commander Assessments</span>
+      <span class="mil-deterrence-badge">${assessments.length} pending</span>
+    </div>
+    ${rows}
+  </div>`;
 }
 
 // ============================================================

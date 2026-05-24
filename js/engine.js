@@ -19,6 +19,12 @@ function getTechEffects() {
     culturalExchangeRelationsBonus: 0,    // bonus relations score per active trade route
     cultureDiplomacyRelationsBonus: 0,    // flat relations bonus to all nations from Cultural Diplomacy tech
     unRelationsBonus:               0,    // flat relations bonus to all nations from UN Membership tech
+    // Equipment / military tech bonuses (Phase 5.7e)
+    unitAttackBonus:       0,     // additive multiplier bonus on all ground unit attack (e.g. 0.10 = +10%)
+    unitDefenseBonus:      0,     // additive multiplier bonus on all ground unit defense
+    mechanisedCombatBonus: 0,     // bonus for armoredCorps + mechanizedInfantry only
+    deterrenceBonus:       0,     // flat deterrence rating bonus (e.g. nuclearDeterrence +40)
+    equipmentRefitCostMult: 1.0,  // multiplicative; <1 reduces refit costs
   };
   for (const id of G.unlockedTechs) {
     const fx = TECHNOLOGIES[id].effects;
@@ -36,6 +42,11 @@ function getTechEffects() {
     if (fx.culturalExchangeRelationsBonus) e.culturalExchangeRelationsBonus += fx.culturalExchangeRelationsBonus;
     if (fx.cultureDiplomacyRelationsBonus) e.cultureDiplomacyRelationsBonus += fx.cultureDiplomacyRelationsBonus;
     if (fx.unRelationsBonus)               e.unRelationsBonus               += fx.unRelationsBonus;
+    if (fx.unitAttackBonus)               e.unitAttackBonus               += fx.unitAttackBonus;
+    if (fx.unitDefenseBonus)              e.unitDefenseBonus              += fx.unitDefenseBonus;
+    if (fx.mechanisedCombatBonus)         e.mechanisedCombatBonus         += fx.mechanisedCombatBonus;
+    if (fx.deterrenceBonus)               e.deterrenceBonus               += fx.deterrenceBonus;
+    if (fx.equipmentRefitCostMult)        e.equipmentRefitCostMult        *= fx.equipmentRefitCostMult;
     if (fx.policyCostMult) {
       for (const [k, v] of Object.entries(fx.policyCostMult)) {
         e.policyCostMult[k] = (e.policyCostMult[k] || 1) * v;
@@ -213,7 +224,12 @@ function calcHappinessTarget() {
   let h = HAPPINESS_BASELINE;
   h += HEALTHCARE_HAPPINESS_MAX * (G.healthcareLevel / 100);
   h += EDUCATION_HAPPINESS_MAX  * (G.educationLevel  / 100);
-  h -= ARMY_HAPPINESS_PENALTY * (G.armyLevel / 100);
+  // Army happiness penalty — based on total unit sizes in service (Phase 5.7e)
+  const armyUnitSizes = (G.commanders || [])
+    .filter(c => c.branch === 'army')
+    .reduce((sum, c) => sum + (c.units || []).reduce((s, u) =>
+      s + (u.status === 'ready' || u.status === 'recruiting' || u.status === 'refitting' ? u.size : 0), 0), 0);
+  h -= Math.min(ARMY_HAPPINESS_PENALTY, armyUnitSizes * ARMY_HAPPINESS_PER_UNIT_SIZE);
   h -= getSupplyHappinessPenalty();
   h -= (G.wars?.length || 0) * WAR_HAPPINESS_PENALTY;
   // Tax: 0% gives +15 happiness, 15% neutral, higher = penalty
@@ -412,20 +428,54 @@ function getMerchantFleetCapacityMultiplier() {
   return Math.min(1, capacity / rawTotal);
 }
 
-// Effective strength of a single navy commander patrolling a sea zone.
-// Applies Naval Base staging bonus if any Naval Base exists in a coastal province adjacent to that zone.
+// Raw attack contribution of all ready naval units in a commander (before bonuses).
+// Carrier fleetMultiplierBonus applies to the sum of all other units in the same commander.
+function getNavyCommanderRawAttack(commander) {
+  const units = (commander.units || []).filter(u => u.status === 'ready');
+  if (units.length === 0) return 0;
+  let baseSum = 0;
+  let carrierBonus = 0;
+  for (const u of units) {
+    const def = NAVAL_UNIT_TYPES[u.type];
+    if (!def) continue;
+    const contribution = def.attack * u.size;
+    baseSum += contribution;
+    if (def.fleetMultiplierBonus) {
+      // Carrier's own attack contributes, but its bonus is applied to others
+      // Track it separately to avoid self-multiplication
+    }
+  }
+  // Apply carrier fleet multiplier bonus
+  for (const u of units) {
+    const def = NAVAL_UNIT_TYPES[u.type];
+    if (def?.fleetMultiplierBonus) {
+      // Bonus applies to all other units' contributions
+      const otherAttack = units
+        .filter(ou => ou.id !== u.id)
+        .reduce((s, ou) => {
+          const od = NAVAL_UNIT_TYPES[ou.type];
+          return s + (od ? od.attack * ou.size : 0);
+        }, 0);
+      carrierBonus += otherAttack * def.fleetMultiplierBonus;
+    }
+  }
+  return baseSum + carrierBonus;
+}
+
+// Effective strength of a single navy commander.
+// For tradeProtection missions, applies Naval Base staging bonus.
 function getNavyCommanderEffectiveStrength(commander) {
-  const baseStrength = G.navyLevel * (commander.strengthAlloc / 100);
-  if (commander.mission !== 'tradeProtection' || !commander.target) return baseStrength;
-  // Check for Naval Base in a coastal province whose nation borders this sea zone
+  const rawAttack = getNavyCommanderRawAttack(commander);
+  if (rawAttack === 0) return 0;
+  if (commander.mission !== 'tradeProtection' || !commander.target) return rawAttack;
   const zone = SEA_PROVINCES[commander.target];
-  if (!zone) return baseStrength;
+  if (!zone) return rawAttack;
   const hasAdjacentBase = G.installations.some(inst => {
     if (inst.type !== 'navalBase') return false;
     const prov = PROVINCES[inst.provinceId];
     return prov && prov.coastal && prov.nationId === 'player';
   });
-  return baseStrength * (hasAdjacentBase ? (1 + NAVAL_BASE_STAGING_BONUS) : 1);
+  return rawAttack * (hasAdjacentBase ? (1 + NAVAL_BASE_STAGING_BONUS) : 1);
 }
 
 // Sum of effective navy + air superiority strength assigned to a zone.
@@ -508,20 +558,25 @@ function getSeaZoneCoastalProvinces(zoneId) {
 }
 
 // Returns true if an air mission targeting 'target' is within range of a player Airfield.
-// mission: 'airSuperiority' | 'strategicBombing'
-// target:  sea zone id (airSuperiority) | nation id (strategicBombing)
+// mission: 'airSuperiority' | 'strategicBombing' | 'airLogistics'
+// target:  sea zone id (airSuperiority) | nation id (strategicBombing) | province id (airLogistics)
 function isAirMissionInRange(mission, target) {
   if (!target) return false;
   const airfields = getAirfieldProvinces();
   if (airfields.length === 0) return false;
-  const range = (mission === 'airSuperiority') ? AIR_SUPERIORITY_RANGE : STRATEGIC_BOMBING_RANGE;
   let targetProvinces;
+  let range;
   if (mission === 'airSuperiority') {
+    range = AIR_SUPERIORITY_RANGE;
     targetProvinces = SEA_PROVINCES[target]
       ? getSeaZoneCoastalProvinces(target)
-      : [target];  // province target (future war use)
+      : [target];
+  } else if (mission === 'airLogistics') {
+    range = AIR_SUPERIORITY_RANGE;  // same range as air superiority
+    targetProvinces = [target];     // target is a province id
   } else {
     // strategicBombing: any province belonging to the target nation
+    range = STRATEGIC_BOMBING_RANGE;
     targetProvinces = Object.entries(PROVINCES)
       .filter(([, p]) => p.nationId === target)
       .map(([id]) => id);
@@ -530,11 +585,42 @@ function isAirMissionInRange(mission, target) {
   return bfsMinHops(airfields, targetProvinces) <= range;
 }
 
-// Effective strength of an Air Force commander (0 if out of range or no Airfield).
+// Effective strength of an Air Force commander for a given mission (0 if out of range or no Airfield).
+// Each unit type contributes attack × size × missionBonus[mission].  Recon reconBonus stacks.
 function getAirCommanderEffectiveStrength(commander) {
   if (commander.branch !== 'airForce') return 0;
-  const base = G.airForceLevel * commander.strengthAlloc / 100;
-  return isAirMissionInRange(commander.mission, commander.target) ? base : 0;
+  const mission = commander.mission || 'airSuperiority';
+  if (!isAirMissionInRange(mission, commander.target)) return 0;
+  const units = (commander.units || []).filter(u => u.status === 'ready');
+  if (units.length === 0) return 0;
+  let base = 0;
+  let reconBonusMult = 1;
+  for (const u of units) {
+    const def = AIR_UNIT_TYPES[u.type];
+    if (!def) continue;
+    const bonus = def.missionBonus?.[mission] ?? 0;
+    base += def.attack * u.size * bonus;
+    if (def.reconBonus) reconBonusMult += def.reconBonus;
+  }
+  return base * reconBonusMult;
+}
+
+// Air logistics supply bonus contributed to a player province by Transport-equipped commanders.
+// Returns 0–1 additive bonus to the province\'s supply level.
+function getAirLogisticsSupplyBonus(provinceId) {
+  if (!provinceId) return 0;
+  let bonus = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'airForce' || cmd.mission !== 'airLogistics' || cmd.target !== provinceId) continue;
+    if (!isAirMissionInRange('airLogistics', provinceId)) continue;
+    for (const u of (cmd.units || [])) {
+      if (u.status !== 'ready') continue;
+      const def = AIR_UNIT_TYPES[u.type];
+      if (!def) continue;
+      bonus += def.attack * u.size * (def.missionBonus?.airLogistics ?? 0) * 0.02;
+    }
+  }
+  return Math.min(0.5, bonus);  // cap bonus at +50% supply
 }
 
 // Air superiority strength contributed to a sea zone by Air Force commanders.
@@ -678,6 +764,27 @@ function getTotalArmyUnitUpkeep() {
     .reduce((s, c) => s + getCommanderUnitUpkeep(c), 0);
 }
 
+// Per-turn upkeep cost for a Navy or Air Force commander (ready + producing units).
+// Uses NAVAL_UNIT_TYPES / AIR_UNIT_TYPES.
+function getNavalAirCommanderUnitUpkeep(cmd) {
+  const typeDefs = cmd.branch === 'navy' ? NAVAL_UNIT_TYPES : AIR_UNIT_TYPES;
+  return (cmd.units || []).reduce((sum, u) => {
+    const def = typeDefs[u.type];
+    return sum + (def ? def.upkeepPerSize * u.size : 0);
+  }, 0);
+}
+
+// Total ready naval/air attack power for a commander (used for assessment logic).
+function getNavalAirCommanderReadyAttack(cmd) {
+  const typeDefs = cmd.branch === 'navy' ? NAVAL_UNIT_TYPES : AIR_UNIT_TYPES;
+  return (cmd.units || [])
+    .filter(u => u.status === 'ready')
+    .reduce((sum, u) => {
+      const def = typeDefs[u.type];
+      return sum + (def ? def.attack * u.size : 0);
+    }, 0);
+}
+
 // Ready units only (excluding those still recruiting).
 function getCommanderReadyUnits(cmd) {
   return (cmd.units || []).filter(u => u.status === 'ready');
@@ -697,9 +804,37 @@ function getCommanderCombatPower(cmd, stat) {
 // ============================================================
 
 // How many turns a unit of this type takes to advance one province hop.
+// Equipment tier speedBonus is added to base speed (Phase 5.7e).
 function getUnitTurnsPerHop(unitType) {
-  const speed = UNIT_TYPES[unitType]?.speed || 1;
-  return Math.ceil(UNIT_MOVEMENT_BASE_TURNS / speed);
+  return Math.ceil(UNIT_MOVEMENT_BASE_TURNS / Math.max(1, getEffectiveUnitSpeed(unitType)));
+}
+
+// ── Equipment refit helpers (Phase 5.7e) ──────────────────────────────────────────────────
+
+// Total sizes of a unit type currently across all army commanders (ready + recruiting + refitting).
+function getUnitTypeInServiceSizes(unitType) {
+  let total = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    for (const unit of (cmd.units || [])) {
+      if (unit.type === unitType) total += unit.size;
+    }
+  }
+  return total;
+}
+
+// Treasury cost to refit all existing units of a type to targetTier.
+function getRefitCost(unitType, targetTier) {
+  const te   = getTechEffects();
+  const base = UNIT_TYPES[unitType]?.costPerSize || 0;
+  const sizes = getUnitTypeInServiceSizes(unitType);
+  const raw  = Math.max(EQUIPMENT_REFIT_BASE_COST, sizes * base * EQUIPMENT_REFIT_COST_FRACTION);
+  return Math.round(raw * te.equipmentRefitCostMult);
+}
+
+// Number of turns a refit takes (5 per tier jump).
+function getRefitTurns(currentTier, targetTier) {
+  return EQUIPMENT_REFIT_TURNS_PER_TIER * Math.max(1, targetTier - currentTier);
 }
 
 // The player province an Army commander's units should converge on, based on their order.
@@ -782,17 +917,29 @@ function getOccupiedFraction(nationId) {
 // Attack strength contributed by all player units currently in a province.
 function getSiegeAttackStrength(provId) {
   let atk = 0;
+  let artilleryPresent = false;
+  let artilleryBonus = 0;
+  const unitAttacks = [];
   for (const cmd of (G.commanders || [])) {
     if (cmd.branch !== 'army') continue;
     for (const unit of (cmd.units || [])) {
       if (unit.status !== 'ready' || unit.position !== provId) continue;
-      atk += (UNIT_TYPES[unit.type]?.attack || 0) * unit.size;
+      const ut = UNIT_TYPES[unit.type];
+      if (ut?.supportAttackBonus) {
+        artilleryPresent = true;
+        artilleryBonus = Math.max(artilleryBonus, ut.supportAttackBonus);
+      } else {
+        unitAttacks.push(getEffectiveUnitAttack(unit.type) * unit.size);
+      }
     }
   }
+  atk = unitAttacks.reduce((s, v) => s + v, 0);
+  if (artilleryPresent) atk *= (1 + artilleryBonus);
   return atk;
 }
 
 // Defense strength contributed by all AI units of a nation currently in a province.
+// AI units always use Mk.I stats (no equipment system for AI in Phase 5.7e).
 function getAiDefenseStrength(provId, nationId) {
   let def = 0;
   const aiMil = G.aiMilitary?.[nationId];
@@ -813,7 +960,7 @@ function getPlayerDefenseStrength(provId) {
     if (cmd.branch !== 'army') continue;
     for (const unit of (cmd.units || [])) {
       if (unit.status !== 'ready' || unit.position !== provId) continue;
-      def += (UNIT_TYPES[unit.type]?.defense || 0) * unit.size;
+      def += getEffectiveUnitDefense(unit.type) * unit.size;
     }
   }
   return def;
@@ -946,26 +1093,86 @@ function computeNationRelations(nationId) {
   return alliance ? Math.max(ALLIANCE_RELATIONS_FLOOR, clamped) : clamped;
 }
 
+// ── Equipment-aware unit stat helpers (Phase 5.7e) ────────────────────────────────────────
+
+// Effective attack for a unit type: base × equipment tier mult × tech bonuses.
+function getEffectiveUnitAttack(unitType) {
+  const base = UNIT_TYPES[unitType]?.attack || 0;
+  const tier = G.equipmentTiers?.[unitType] || 1;
+  const tf   = EQUIPMENT_TIERS[tier];
+  const te   = getTechEffects();
+  let mult = tf.attackMult * (1 + te.unitAttackBonus);
+  if (unitType === 'armoredCorps' || unitType === 'mechanizedInfantry') mult *= (1 + te.mechanisedCombatBonus);
+  return base * mult;
+}
+
+// Effective defense for a unit type: base × equipment tier mult × tech bonuses.
+function getEffectiveUnitDefense(unitType) {
+  const base = UNIT_TYPES[unitType]?.defense || 0;
+  const tier = G.equipmentTiers?.[unitType] || 1;
+  const tf   = EQUIPMENT_TIERS[tier];
+  const te   = getTechEffects();
+  let mult = tf.defenseMult * (1 + te.unitDefenseBonus);
+  if (unitType === 'armoredCorps' || unitType === 'mechanizedInfantry') mult *= (1 + te.mechanisedCombatBonus);
+  return base * mult;
+}
+
+// Effective speed for a unit type: base speed + equipment tier speedBonus.
+function getEffectiveUnitSpeed(unitType) {
+  const base = UNIT_TYPES[unitType]?.speed || 1;
+  const tier = G.equipmentTiers?.[unitType] || 1;
+  return base + (EQUIPMENT_TIERS[tier]?.speedBonus || 0);
+}
+
 // Military branches (Phase 5.1) ============================================================
 
 // Weighted 0\u2013100 deterrence score: Army 50%, Navy 25%, Air Force 25%.
 // Used for leverage in trade negotiations and the Military screen.
 function getDeterrenceRating() {
-  return G.armyLevel * 0.5 + G.navyLevel * 0.25 + G.airForceLevel * 0.25;
+  const armyContrib = getArmyStrength() / ARMY_STRENGTH_MAX * 50;
+  const navyContrib = getNavyStrength() / NAVY_STRENGTH_MAX * 25;
+  const airContrib  = getAirForceStrength() / AIRFORCE_STRENGTH_MAX * 25;
+  const te = getTechEffects();
+  return Math.min(100, armyContrib + navyContrib + airContrib + te.deterrenceBonus);
 }
 
-// Army strength: Army's contribution to deterrence, manpower-gated by population.
+// Army strength: total effective attack power of ready units, normalised to 0–ARMY_STRENGTH_MAX.
 function getArmyStrength() {
-  const raw = ARMY_STRENGTH_MAX * (G.armyLevel / 100);
-  return Math.min(raw, G.population * MILITARY_MANPOWER_RATIO);
+  let totalAttack = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready') continue;
+      totalAttack += getEffectiveUnitAttack(unit.type) * unit.size;
+    }
+  }
+  return Math.min(ARMY_STRENGTH_MAX, totalAttack / ARMY_DETERRENCE_ATTACK_SCALE);
 }
 
 function getNavyStrength() {
-  return NAVY_STRENGTH_MAX * (G.navyLevel / 100);
+  let totalAttack = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'navy') continue;
+    totalAttack += getNavyCommanderEffectiveStrength(cmd);
+  }
+  return Math.min(NAVY_STRENGTH_MAX, totalAttack / NAVY_DETERRENCE_ATTACK_SCALE);
 }
 
 function getAirForceStrength() {
-  return AIRFORCE_STRENGTH_MAX * (G.airForceLevel / 100);
+  let totalAttack = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'airForce') continue;
+    // Sum across all missions for deterrence (use airSuperiority as proxy)
+    const units = (cmd.units || []).filter(u => u.status === 'ready');
+    for (const u of units) {
+      const def = AIR_UNIT_TYPES[u.type];
+      if (!def) continue;
+      // Use best mission contribution for deterrence
+      const maxBonus = Math.max(...Object.values(def.missionBonus || { default: 1 }));
+      totalAttack += def.attack * u.size * maxBonus;
+    }
+  }
+  return Math.min(AIRFORCE_STRENGTH_MAX, totalAttack / AIR_DETERRENCE_ATTACK_SCALE);
 }
 
 // Total deterrence in absolute strength units (sum of all branch strengths).

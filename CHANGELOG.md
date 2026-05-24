@@ -4,6 +4,63 @@ All notable changes to Government Simulator will be documented here.
 
 ---
 
+## [Unreleased] — Phase 5.7f: Commander Brain + Naval/Air Unit Rosters
+
+### Added
+- **`NAVAL_UNIT_TYPES`** (`data.js`): 6 naval unit types — Destroyer, Frigate, Cruiser, Battleship, Submarine (blockade bonus), Carrier (fleet multiplier bonus). Each has `costPerSize`, `upkeepPerSize`, `productionTurns`, `attack`, `defense`, `speed`.
+- **`AIR_UNIT_TYPES`** (`data.js`): 5 air unit types — Fighter, Ground Attack, Strategic Bomber, Transport, Recon/Spy. Each has per-mission `missionBonus` and optional `reconBonus`.
+- **Production queue** (`state.js`): `G.productionQueue` — global ordered queue for navy/air unit production. `G.nextProductionItemId`, `G.commanderAssessments`, `G.nextAssessmentId`, `G.commanderAssessmentCooldowns`.
+- **New constants** (`constants.js`): `NAVY_DETERRENCE_ATTACK_SCALE`, `AIR_DETERRENCE_ATTACK_SCALE`, `PRODUCTION_SUPPLY_SLOW_THRESHOLD`, `COMMANDER_ASSESSMENT_INTERVAL`, `COMMANDER_ASSESS_RECRUIT_THRESHOLD`, `COMMANDER_ASSESS_BUDGET_THRESHOLD`. Raised `NAVY_STRENGTH_MAX` and `AIRFORCE_STRENGTH_MAX` to 25.
+- **Unit-based navy/air strength** (`engine.js`): `getNavyCommanderRawAttack`, updated `getNavyCommanderEffectiveStrength`, `getAirCommanderEffectiveStrength`, `getAirLogisticsSupplyBonus`, `getNavyStrength`, `getAirForceStrength`, `getNavalAirCommanderUnitUpkeep`, `getNavalAirCommanderReadyAttack`. `isAirMissionInRange` extended to support `airLogistics` (player province target).
+- **Production queue actions** (`actions.js`): `queueProductionItem` — deducts cost upfront, enqueues item; `cancelProductionItem` — 50% refund if not active. `acceptAssessment`, `dismissAssessment` for the commander brain panel.
+- **Naval/Air upkeep & production processing** (`actions.js` `nextTurn`): Navy/air unit upkeep deducted per turn; production queue item advanced each turn (slowed when supply ratio < threshold); completed items spawn the unit on the commander. Commander brain assessments generated every `COMMANDER_ASSESSMENT_INTERVAL` turns (recruit recommendation or budget increase request).
+- **Unit-roster commander UI** (`render.js`): Navy/Air commander cards now show budget input, unit roster list, and production queue form (unit type + size + name). `airLogistics` mission option added with player-province targets. `renderProductionQueueHtml()` and `renderCommanderAssessmentsHtml()` standalone sections below commander list.
+- **CSS** (`style.css`): `.mil-prodqueue-section`, `.mil-prodqueue-row`, `.mil-assessments-section`, `.mil-assessment-row`, `.mil-assessment-reason`, `.mil-commander-budget-row`, `.mil-budget-free`.
+
+### Changed
+- **Navy/Air commander shape**: `strengthAlloc` removed; replaced by `budget`, `nextUnitId`, `units[]`. `mission` and `target` retained.
+- **`branchCard()`**: Navy/Air cards no longer show Level or Funding — show unit count and total strength instead.
+- **Dashboard stats**: Navy Level and Air Force Level replaced with Navy Strength and Air Force Strength.
+- **History chart**: `navyLevel`/`airForceLevel` entries replaced with `deterrenceRating`.
+- **`getDeterrenceRating()`**: Now uses `getNavyStrength()` and `getAirForceStrength()` instead of `G.navyLevel`/`G.airForceLevel`.
+
+### Removed
+- **`G.navyLevel`**, **`G.airForceLevel`**: Removed from state. Unit rosters replace them.
+- **`policyFunding.navy`**, **`policyFunding.airForce`**: Removed. Navy/Air strength is now purely unit-roster-based, funded via per-commander budget.
+- **`updateCommanderAlloc()`**: Removed. Navy/Air commanders no longer have a strength allocation slider.
+- **Navy/Air level-building loop** (`nextTurn`): Section 1.6 removed.
+
+---
+
+## [Unreleased] — Phase 5.7e: Equipment Design
+
+### Added
+- **`EQUIPMENT_TIERS`** (`data.js`): 3-tier equipment table — Mk.I (baseline), Mk.II (requires Advanced Metallurgy: +40% ATK, +35% DEF, +1 SPD), Mk.III (requires Composite Armour: +80% ATK, +70% DEF, +2 SPD).
+- **`G.equipmentTiers`** (`state.js`): Per-unit-type tier tracking (all 7 ground types start at 1). **`G.activeRefits`**: list of in-progress refits `{ unitType, targetTier, turnsLeft }`.
+- **Equipment refit helpers** (`engine.js`): `getEffectiveUnitAttack()`, `getEffectiveUnitDefense()`, `getEffectiveUnitSpeed()` — compute actual unit stats incorporating equipment tier multipliers and tech bonuses. `getRefitCost()`, `getRefitTurns()`, `getUnitTypeInServiceSizes()` — calculate refit economics.
+- **`orderRefit(unitType, targetTier)`** (`actions.js`): Deducts treasury cost, marks all in-service units of the type as `'refitting'`, and queues a refit. Validates: tech prerequisite, no active refit for that type, sufficient treasury, and units in service.
+- **Refit countdown** (`actions.js` endTurn, section 2.4e-r): Each turn decrements `turnsLeft`; at 0 the tier is upgraded, all `'refitting'` units of that type revert to `'ready'`, and a log entry is added.
+- **Equipment tab** (`index.html`, `render.js`, `css/style.css`): New `⚙️ Equipment` tab (unlocked by Basic Metallurgy). Shows a card per unit type with current effective stats, tier badge, in-service count, next-tier preview stats, cost/turns, and Refit button. Disabled if tech locked, already max tier, refit in progress, no units, or insufficient treasury.
+- **Equipment constants** (`constants.js`): `EQUIPMENT_REFIT_COST_FRACTION`, `EQUIPMENT_REFIT_BASE_COST`, `EQUIPMENT_REFIT_TURNS_PER_TIER`, `ARMY_DETERRENCE_ATTACK_SCALE`, `ARMY_HAPPINESS_PER_UNIT_SIZE`.
+- **`materialScience` effect** (`data.js`): Now applies `equipmentRefitCostMult: 0.80` (−20% refit cost) in `getTechEffects()`.
+
+### Changed
+- **`G.armyLevel` removed** (`state.js`, `engine.js`, `actions.js`, `render.js`): Army level as a 0–100 policy lever is gone. Army strength is now derived entirely from the unit roster (`getArmyStrength()` sums effective attack power of ready units).
+- **`policyFunding.army` removed** (`state.js`): Army branch no longer receives policy funding. The section 1.6 military branch funding loop now iterates only `['navy', 'airForce']`.
+- **`getDeterrenceRating()`** (`engine.js`): Rewritten — Army contributes via `getArmyStrength() / ARMY_STRENGTH_MAX × 50`; tech `deterrenceBonus` is added.
+- **`getArmyStrength()`** (`engine.js`): Rewritten — sums `getEffectiveUnitAttack(type) × size` for all ready units, normalised by `ARMY_DETERRENCE_ATTACK_SCALE`, capped at `ARMY_STRENGTH_MAX`.
+- **`calcHappinessTarget()`** (`engine.js`): Army happiness penalty now scales with total unit sizes in service (all statuses) × `ARMY_HAPPINESS_PER_UNIT_SIZE`, not `armyLevel`.
+- **`getUnitTurnsPerHop()`** (`engine.js`): Now uses `getEffectiveUnitSpeed()` so equipment tier speed bonuses affect movement.
+- **`getSiegeAttackStrength()`** (`engine.js`): Uses `getEffectiveUnitAttack()` per unit; artillery applies `supportAttackBonus` as a multiplier on combined non-artillery attack.
+- **`getPlayerDefenseStrength()`** (`engine.js`): Uses `getEffectiveUnitDefense()` per unit.
+- **Overview indicators** (`render.js`): "Army Level" indicator removed.
+- **Statistics sector status** (`render.js`): "Army" row removed from the sector chart.
+- **Military screen Army card** (`render.js`): Replaced policy-level branchCard with a unit-roster card showing strength, average equipment tier, and a hint to use the Equipment tab.
+- **History snapshots** (`actions.js`): `armyLevel` removed from the per-turn snapshot object.
+- **`ARMY_STRENGTH_MAX` comment** (`constants.js`): Constant retained (used for deterrence normalisation).
+
+---
+
 ## [Unreleased] — Phase 5.7d: Research Tree Redesign
 
 ### Added

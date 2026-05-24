@@ -38,10 +38,24 @@ function initGame(empireName) {
     educationLevel: 0,
 
     // Military branch levels (0–100) — Phase 5.1.
-    // Each branch is unlocked by a separate tech; all decay at full SECTOR_DECAY when unfunded.
-    armyLevel:     0,
-    navyLevel:     0,
-    airForceLevel: 0,
+    // Army level removed in Phase 5.7e; unit roster + equipment tier replaces it.
+    // Navy and Air Force levels removed in Phase 5.7f; unit rosters replace them too.
+
+    // Equipment tiers per ground unit type (Phase 5.7e).
+    // Each entry is 1 (Mk.I), 2 (Mk.II), or 3 (Mk.III).
+    equipmentTiers: {
+      lightInfantry:      1,
+      mechanizedInfantry: 1,
+      armoredCorps:       1,
+      artilleryBattery:   1,
+      reconUnit:          1,
+      antiAirBattery:     1,
+      antiTankBattalion:  1,
+    },
+
+    // Active equipment refits — [{ unitType, targetTier, turnsLeft }]
+    // Units of the refitting type get status 'refitting' during the countdown.
+    activeRefits: [],
 
     // Research level (0 – ceiling). Ceiling starts at RESEARCH_LEVEL_BASE_CEILING and is raised
     // by completing research projects. Determines RP/turn toward active technology research.
@@ -65,7 +79,9 @@ function initGame(empireName) {
     //   threatenNext:bool, nationOffer:{exportQuality,importQuality}|null, isRenegotiation:bool }
     activeNegotiation: null,
 
-    // Funding 0-20 = percentage of tax income allocated to this policy
+    // Funding 0-20 = percentage of tax income allocated to this policy.
+    // Army removed in Phase 5.7e; Navy/Air Force removed in Phase 5.7f.
+    // Commander budgets handle all military spending directly.
     policyFunding: {
       mining: 0,
       manufacturing: 0,
@@ -75,31 +91,42 @@ function initGame(empireName) {
       infrastructure: 0,
       healthcare: 0,
       education: 0,
-      army: 0,
-      navy: 0,
-      airForce: 0,
       research: 0,
       prospecting: 0,
     },
 
-    // TEST: military + diplomacy techs pre-unlocked for Phase 5.3 testing
+    // TEST: military + diplomacy + equipment techs pre-unlocked
     unlockedTechs: [
       'standingArmy', 'navalFleet', 'airForceEstablishment',
       'tradeAgreements', 'diplomacyCorps', 'culturalExchange',
       'strategicAlliances', 'culturalDiplomacy', 'economicUnions', 'unMembership',
+      'basicMetallurgy', 'ballisticsResearch', 'advancedMetallurgy',
     ],
 
     // Province installations (Phase 5.3) — [{ type: 'airfield'|'navalBase', provinceId: string }]
     installations: [],
 
-    // Commanders (Phase 5.4) — strategic directive assignments for each military branch.
-    // Navy/Air Force shape: { id, name, branch, strengthAlloc: 0–100, mission, target }
-    //   strengthAlloc = % of that branch's level dedicated to this commander.
+    // Global production queue (Phase 5.7f) — naval and air units are built here.
+    // Only the first item is actively produced each turn.
+    // Shape: { id, commanderId, branch, unitType, size, unitName, turnsTotal, turnsLeft }
+    productionQueue: [],
+    nextProductionItemId: 1,
+
+    // Commander assessments (Phase 5.7f) — semi-automatic brain recommendations.
+    // Shape: { id, commanderId, type: 'recruit'|'increaseBudget', unitType?, size?, amount?, reason }
+    // Player accepts (triggers the action) or dismisses (removes from list).
+    commanderAssessments: [],
+    nextAssessmentId: 1,
+
+    // Per-commander assessment cooldown — { [commanderId]: turnsUntilNextAssessment }
+    commanderAssessmentCooldowns: {},
+
+    // Commanders (Phase 5.4 / 5.7f) — strategic directive assignments for each military branch.
+    // Army shape: { id, name, branch:'army', budget, nextUnitId, units:[], order:{type,target} }
+    // Navy/Air shape (Phase 5.7f): { id, name, branch, budget, nextUnitId, units[], mission, target }
     //   Navy missions: 'tradeProtection' (target: sea zone ID)
-    //   Air Force missions: 'airSuperiority' | 'strategicBombing' (target: sea zone or nation ID)
-    // Army shape (Phase 5.7a): { id, name, branch:'army', budget: M/turn, nextUnitId, units: [] }
-    //   budget = M gold/turn authorised for this commander; units drawn from UNIT_TYPES.
-    //   Unit shape: { id, name, type, size, status:'recruiting'|'ready', recruitTurnsLeft }
+    //   Air missions: 'airSuperiority' | 'strategicBombing' | 'airLogistics' (target: sea zone / nation / province)
+    //   Unit shape: { id, name, type, size, status:'ready' }  (typeDefs from NAVAL_UNIT_TYPES / AIR_UNIT_TYPES)
     commanders: [],
     nextCommanderId: 1,
 

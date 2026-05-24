@@ -588,21 +588,18 @@ function addCommander(name, branch) {
       order:       { type: 'hold', target: null },
     });
   } else {
+    // Navy and Air Force: same budget + unit roster model as Army (Phase 5.7f).
+    // Additionally retain mission + target for strategic directive.
     Object.assign(base, {
-      strengthAlloc: 10,
-      mission:       defaultMissions[branch] || null,
-      target:        defaultTargets[branch]  || null,
+      budget:      0,
+      nextUnitId:  1,
+      units:       [],
+      mission:     defaultMissions[branch] || null,
+      target:      defaultTargets[branch]  || null,
     });
   }
 
   G.commanders.push(base);
-  renderAll();
-}
-
-function updateCommanderAlloc(id, alloc) {
-  const cmd = G.commanders.find(c => c.id === id);
-  if (!cmd) return;
-  cmd.strengthAlloc = Math.max(0, Math.min(100, Number(alloc) || 0));
   renderAll();
 }
 
@@ -616,6 +613,10 @@ function updateCommanderMission(id, mission, target) {
 
 function removeCommander(id) {
   G.commanders = G.commanders.filter(c => c.id !== id);
+  // Also cancel any queued production items for this commander
+  G.productionQueue = (G.productionQueue || []).filter(item => item.commanderId !== id);
+  // Remove any assessments for this commander
+  G.commanderAssessments = (G.commanderAssessments || []).filter(a => a.commanderId !== id);
   renderAll();
 }
 
@@ -625,7 +626,7 @@ function removeCommander(id) {
 
 function setCommanderBudget(commanderId, value) {
   const cmd = G.commanders.find(c => c.id === commanderId);
-  if (!cmd || cmd.branch !== 'army') return;
+  if (!cmd) return;
   cmd.budget = Math.max(0, Number(value) || 0);
   renderAll();
 }
@@ -676,6 +677,84 @@ function setCommanderOrder(commanderId, orderType, target) {
   cmd.order = { type: orderType, target: target || null };
   // Reset all unit move timers so they start fresh toward new deployment
   for (const unit of (cmd.units || [])) unit.moveTimer = 0;
+  renderAll();
+}
+
+// ============================================================
+// NAVAL / AIR UNIT PRODUCTION QUEUE — Phase 5.7f
+// ============================================================
+
+// Add a Navy or Air Force unit to the global production queue.
+// Cost is deducted from treasury up-front; unit joins the queue and is created
+// when it reaches the front and completes its production countdown.
+function queueProductionItem(commanderId, unitType, size, unitName) {
+  const cmd = G.commanders.find(c => c.id === commanderId);
+  if (!cmd || (cmd.branch !== 'navy' && cmd.branch !== 'airForce')) return;
+  const typeDefs = cmd.branch === 'navy' ? NAVAL_UNIT_TYPES : AIR_UNIT_TYPES;
+  const def = typeDefs[unitType];
+  if (!def) return;
+  const clampedSize = Math.max(1, Math.min(UNIT_MAX_SIZE, Number(size) || 1));
+  const cost = def.costPerSize * clampedSize;
+  if (G.treasury < cost) {
+    addLog(`Not enough funds to build ${def.name} (need ${fmt(cost)}M).`, 'bad');
+    return;
+  }
+  G.treasury -= cost;
+  const itemId = 'prod_' + (G.nextProductionItemId++);
+  const resolvedName = (unitName && unitName.trim()) ? unitName.trim()
+    : `${def.name} #${cmd.nextUnitId}`;
+  cmd.nextUnitId = (cmd.nextUnitId || 1) + 1;
+  G.productionQueue.push({
+    id:          itemId,
+    commanderId,
+    branch:      cmd.branch,
+    unitType,
+    size:        clampedSize,
+    unitName:    resolvedName,
+    turnsTotal:  def.productionTurns,
+    turnsLeft:   def.productionTurns,
+  });
+  addLog(`${cmd.name}: ${def.name} (×${clampedSize}) queued for production — ${def.productionTurns} turn${def.productionTurns !== 1 ? 's' : ''} to complete.`, 'good');
+  renderAll();
+}
+
+function cancelProductionItem(itemId) {
+  const idx = (G.productionQueue || []).findIndex(i => i.id === itemId);
+  if (idx < 0) return;
+  const item = G.productionQueue[idx];
+  const typeDefs = item.branch === 'navy' ? NAVAL_UNIT_TYPES : AIR_UNIT_TYPES;
+  const def = typeDefs[item.unitType];
+  // Partial refund: 50% if not yet started (not front of queue), 0% if in production
+  const isActive = idx === 0;
+  const refund = isActive ? 0 : Math.floor((def?.costPerSize || 0) * item.size * 0.5);
+  if (refund > 0) G.treasury += refund;
+  G.productionQueue.splice(idx, 1);
+  addLog(`Production of "${item.unitName}" cancelled.${refund > 0 ? ` +${fmt(refund)}M refunded.` : ''}`, 'neutral');
+  renderAll();
+}
+
+// ============================================================
+// COMMANDER ASSESSMENTS — Phase 5.7f
+// ============================================================
+
+function acceptAssessment(assessmentId) {
+  const assess = (G.commanderAssessments || []).find(a => a.id === assessmentId);
+  if (!assess) return;
+  G.commanderAssessments = G.commanderAssessments.filter(a => a.id !== assessmentId);
+  if (assess.type === 'recruit') {
+    queueProductionItem(assess.commanderId, assess.unitType, assess.size, null);
+  } else if (assess.type === 'increaseBudget') {
+    const cmd = G.commanders.find(c => c.id === assess.commanderId);
+    if (cmd) {
+      cmd.budget = (cmd.budget || 0) + assess.amount;
+      addLog(`${cmd.name}: budget raised by +${fmt(assess.amount)}M/turn as recommended.`, 'good');
+      renderAll();
+    }
+  }
+}
+
+function dismissAssessment(assessmentId) {
+  G.commanderAssessments = (G.commanderAssessments || []).filter(a => a.id !== assessmentId);
   renderAll();
 }
 
@@ -933,28 +1012,7 @@ function endTurn() {
     }
   }
 
-  // 1.6. Update military branch levels (Army, Navy, Air Force).
-  // Each branch requires its respective tech; locked branches still decay.
-  {
-    for (const branchId of ['army', 'navy', 'airForce']) {
-      const levelKey  = branchId + 'Level';
-      const policyDef = POLICIES[branchId];
-      const isLocked  = policyDef && policyDef.requiresTech && !G.unlockedTechs.includes(policyDef.requiresTech);
-      if (isLocked) {
-        if (G[levelKey] > 0) G[levelKey] = Math.max(0, G[levelKey] - SECTOR_DECAY);
-        continue;
-      }
-      const spend = (G.policyFunding[branchId] || 0) > 0
-        ? getTaxIncome() * (G.policyFunding[branchId] / 100) : 0;
-      if (spend > 0) {
-        const growRate = SECTOR_GROW_PER_M / (1 + SECTOR_GROW_HARDNESS * G[levelKey]);
-        const net      = spend * growRate - SECTOR_DECAY;
-        G[levelKey]    = Math.min(100, Math.max(0, G[levelKey] + net));
-      } else if (G[levelKey] > 0) {
-        G[levelKey] = Math.max(0, G[levelKey] - SECTOR_DECAY);
-      }
-    }
-  }
+  // 1.6. (Navy/Air Force level-building removed in Phase 5.7f — replaced by unit rosters.)
 
   // 1.7. Research level — same growth model as social sectors, capped at getResearchCapacityCeiling()
   {
@@ -1052,6 +1110,127 @@ function endTurn() {
         addLog(`✅ ${cmd.name}: "${unit.name}" is ready.`, 'good');
       }
     }
+  }
+
+  // 2.4e-r. Equipment refit countdown (Phase 5.7e)
+  for (const refit of (G.activeRefits || [])) {
+    refit.turnsLeft = Math.max(0, refit.turnsLeft - 1);
+    if (refit.turnsLeft === 0) {
+      G.equipmentTiers[refit.unitType] = refit.targetTier;
+      for (const cmd of (G.commanders || [])) {
+        if (cmd.branch !== 'army') continue;
+        for (const unit of (cmd.units || [])) {
+          if (unit.type === refit.unitType && unit.status === 'refitting') unit.status = 'ready';
+        }
+      }
+      addLog(`✅ ${UNIT_TYPES[refit.unitType]?.name || refit.unitType} upgraded to ${EQUIPMENT_TIERS[refit.targetTier].name}.`, 'good');
+    }
+  }
+  G.activeRefits = (G.activeRefits || []).filter(r => r.turnsLeft > 0);
+
+  // 2.4e-nav. Navy and Air Force unit upkeep + budget shortfall warnings (Phase 5.7f)
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'navy' && cmd.branch !== 'airForce') continue;
+    const upkeep = getNavalAirCommanderUnitUpkeep(cmd);
+    if (upkeep > 0) {
+      G.treasury -= upkeep;
+      const free = (cmd.budget || 0) - upkeep;
+      if (free < -UNIT_UNDERFUND_WARNING_THRESHOLD) {
+        addLog(`⚠ ${cmd.name}: unit upkeep (${fmt(upkeep)}M) exceeds budget (${fmt(cmd.budget || 0)}M).`, 'bad');
+      }
+    }
+  }
+
+  // 2.4e-pq. Global production queue processing (Phase 5.7f)
+  // Only the first item in the queue is actively built each turn.
+  // Supply shortfall below PRODUCTION_SUPPLY_SLOW_THRESHOLD slows progress.
+  {
+    const queue = (G.productionQueue || []);
+    if (queue.length > 0) {
+      const item = queue[0];
+      const supplyRatio = getSupplyRatio();
+      const speedMult = supplyRatio < PRODUCTION_SUPPLY_SLOW_THRESHOLD ? supplyRatio : 1;
+      item.turnsLeft = Math.max(0, item.turnsLeft - speedMult);
+      if (item.turnsLeft <= 0) {
+        // Production complete — add unit to commander
+        const cmd = (G.commanders || []).find(c => c.id === item.commanderId);
+        if (cmd) {
+          const unitId = item.commanderId + '_u' + (cmd.nextUnitId || 1);
+          if (!cmd.nextUnitId) cmd.nextUnitId = 1;
+          cmd.units = cmd.units || [];
+          cmd.units.push({
+            id:     unitId,
+            name:   item.unitName,
+            type:   item.unitType,
+            size:   item.size,
+            status: 'ready',
+          });
+          cmd.nextUnitId++;
+          const typeDefs = item.branch === 'navy' ? NAVAL_UNIT_TYPES : AIR_UNIT_TYPES;
+          const defName = typeDefs[item.unitType]?.name || item.unitType;
+          addLog(`✅ ${cmd.name}: "${item.unitName}" (${defName} ×${item.size}) production complete.`, 'good');
+        }
+        G.productionQueue.shift();
+        if (G.productionQueue.length > 0) {
+          const next = G.productionQueue[0];
+          const nextDef = (next.branch === 'navy' ? NAVAL_UNIT_TYPES : AIR_UNIT_TYPES)[next.unitType];
+          addLog(`🏭 Production started: ${nextDef?.name || next.unitType} for ${(G.commanders||[]).find(c=>c.id===next.commanderId)?.name || 'unknown'}.`, 'info');
+        }
+      }
+    }
+  }
+
+  // 2.4e-as. Commander brain assessments (Phase 5.7f)
+  // Semi-automatic: each Navy/Air commander posts one recommendation per COMMANDER_ASSESSMENT_INTERVAL
+  // turns if they have no pending assessment already.
+  {
+    const cooldowns = G.commanderAssessmentCooldowns || {};
+    for (const cmd of (G.commanders || [])) {
+      if (cmd.branch !== 'navy' && cmd.branch !== 'airForce') continue;
+      // Tick down cooldown
+      if (!cooldowns[cmd.id]) cooldowns[cmd.id] = 0;
+      if (cooldowns[cmd.id] > 0) { cooldowns[cmd.id]--; continue; }
+      // Skip if assessment already pending for this commander
+      if ((G.commanderAssessments || []).some(a => a.commanderId === cmd.id)) continue;
+      const readyAttack = getNavalAirCommanderReadyAttack(cmd);
+      const upkeep = getNavalAirCommanderUnitUpkeep(cmd);
+      const shortfall = upkeep - (cmd.budget || 0);
+      let assessed = false;
+      // Priority 1: recommend recruiting if attack power is low
+      if (!assessed && readyAttack < COMMANDER_ASSESS_RECRUIT_THRESHOLD && (cmd.budget || 0) > 0) {
+        const typeDefs = cmd.branch === 'navy' ? NAVAL_UNIT_TYPES : AIR_UNIT_TYPES;
+        const cheapestType = Object.entries(typeDefs)
+          .filter(([, d]) => d.attack > 0)
+          .sort(([, a], [, b]) => a.costPerSize - b.costPerSize)[0];
+        if (cheapestType) {
+          const [unitType, unitDef] = cheapestType;
+          G.commanderAssessments = G.commanderAssessments || [];
+          G.commanderAssessments.push({
+            id:          'assess_' + (G.nextAssessmentId++),
+            commanderId: cmd.id,
+            type:        'recruit',
+            unitType,
+            size:        1,
+            reason:      `${cmd.name} has low combat strength (${readyAttack.toFixed(0)} attack). Recommends recruiting ${unitDef.name}.`,
+          });
+          assessed = true;
+        }
+      }
+      // Priority 2: recommend budget increase if in significant shortfall
+      if (!assessed && shortfall > COMMANDER_ASSESS_BUDGET_THRESHOLD) {
+        G.commanderAssessments = G.commanderAssessments || [];
+        G.commanderAssessments.push({
+          id:          'assess_' + (G.nextAssessmentId++),
+          commanderId: cmd.id,
+          type:        'increaseBudget',
+          amount:      Math.ceil(shortfall),
+          reason:      `${cmd.name}: unit upkeep (${fmt(upkeep)}M/t) exceeds budget (${fmt(cmd.budget||0)}M/t). Recommends +${fmt(Math.ceil(shortfall))}M/turn.`,
+        });
+        assessed = true;
+      }
+      if (assessed) cooldowns[cmd.id] = COMMANDER_ASSESSMENT_INTERVAL;
+    }
+    G.commanderAssessmentCooldowns = cooldowns;
   }
 
   // 2.4f. Army unit movement toward deployment province (Phase 5.7b)
@@ -1347,9 +1526,6 @@ function endTurn() {
     financeLevel:    G.financeLevel,
     healthcareLevel: G.healthcareLevel,
     educationLevel:  G.educationLevel,
-    armyLevel:       G.armyLevel,
-    navyLevel:       G.navyLevel,
-    airForceLevel:   G.airForceLevel,
     deterrenceRating: getDeterrenceRating(),
     researchLevel:   G.researchLevel,
     tradeRoutes:     G.tradeRoutes.length,
@@ -1400,5 +1576,40 @@ function buildInstallation(type, provinceId) {
   G.treasury -= cost;
   G.installations.push({ type, provinceId });
   addLog('Built ' + def.icon + ' ' + def.name + ' in ' + province.name + ': −' + fmt(cost) + ' (maintenance: −' + fmt(def.maintenance) + '/turn)', 'neutral');
+  renderAll();
+}
+
+// ── Equipment refit (Phase 5.7e) ──────────────────────────────────────────────────────────
+// Order a refit of all in-service units of unitType to targetTier.
+function orderRefit(unitType, targetTier) {
+  if (!G.equipmentTiers) return;
+  const currentTier = G.equipmentTiers[unitType] || 1;
+  if (targetTier <= currentTier) return;
+  const reqTech = EQUIPMENT_TIERS[targetTier]?.requiresTech;
+  if (reqTech && !G.unlockedTechs.includes(reqTech)) {
+    showNotification('Requires ' + TECHNOLOGIES[reqTech].name + ' to upgrade.', 'bad');
+    return;
+  }
+  if ((G.activeRefits || []).some(r => r.unitType === unitType)) {
+    showNotification('Refit already in progress for this unit type.', 'bad');
+    return;
+  }
+  const cost = getRefitCost(unitType, targetTier);
+  if (G.treasury < cost) {
+    showNotification('Not enough treasury — need ' + fmt(cost) + 'M.', 'bad');
+    return;
+  }
+  G.treasury -= cost;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    for (const unit of (cmd.units || [])) {
+      if (unit.type === unitType && (unit.status === 'ready' || unit.status === 'recruiting')) {
+        unit.status = 'refitting';
+      }
+    }
+  }
+  const turns = getRefitTurns(currentTier, targetTier);
+  G.activeRefits.push({ unitType, targetTier, turnsLeft: turns });
+  addLog(`⚙️ Refit started: ${UNIT_TYPES[unitType]?.name} → ${EQUIPMENT_TIERS[targetTier].name}. (${turns} turns, −${fmt(cost)}M)`, 'info');
   renderAll();
 }
