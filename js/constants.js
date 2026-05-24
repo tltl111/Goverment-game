@@ -46,15 +46,160 @@ const HEALTHCARE_HAPPINESS_MAX   = 25;    // happiness contribution at healthcar
 const EDUCATION_HAPPINESS_MAX    = 10;    // happiness contribution at educationLevel 100
 const EDUCATION_GDP_GROWTH_MAX   = 0.015; // GDP growth bonus at educationLevel 100
 const EDUCATION_RP_BONUS_MAX     = 3;     // RP/centre bonus at educationLevel 100
-const MILITARY_STRENGTH_MAX      = 50;    // military strength at militaryLevel 100
-const MILITARY_HAPPINESS_PENALTY = 3;     // happiness penalty at militaryLevel 100
+
+// Military branches (Phase 5.1 / 5.7f)
+// getDeterrenceRating() returns a 0–100 weighted score (army 50%, navy 25%, air 25%).
+// Army strength is further manpower-gated by population × MILITARY_MANPOWER_RATIO.
+// Navy and Air Force strength (Phase 5.7f) is derived from recruitable unit rosters,
+// not from policy levels.  NAVY/AIRFORCE_STRENGTH_MAX are display/normalisation caps.
+const ARMY_STRENGTH_MAX      = 30;   // army deterrence cap (unit-attack / ARMY_DETERRENCE_ATTACK_SCALE)
+const NAVY_STRENGTH_MAX      = 25;   // navy deterrence cap (unit-attack / NAVY_DETERRENCE_ATTACK_SCALE)
+const AIRFORCE_STRENGTH_MAX  = 25;   // air deterrence cap  (unit-attack / AIR_DETERRENCE_ATTACK_SCALE)
+const ARMY_HAPPINESS_PENALTY = 3;    // happiness penalty at armyLevel 100
 
 // Manufacturing import cost: paid per turn when Manufacturing level exceeds Mining level
 const MANUFACTURING_IMPORT_COST_PER_LEVEL = 0.3; // $M/turn per level gap
 
-// Trade routes — maturity-based income (placeholder until goods/resources system in Phase 3.5)
-const TRADE_ROUTE_MATURITY_TURNS  = 50;   // turns for a route to reach full income
-const TRADE_ROUTE_INCOME_MAX      = 15;   // $M/turn per route at full maturity
+// Goods flow / Supply system (Phase 5.2)
+// Production: manufacturingLevel × GOODS_PER_MFG_LEVEL units/turn
+// Delivery:   produced × (0.5 + 0.5 × infraLevel/100)  — infra 0 = 50%, infra 100 = 100%
+// Demand:     population × GOODS_PER_MILLION_POP  +  armyStrength × GOODS_PER_ARMY_STRENGTH
+// Deficit:    happiness penalty (max SUPPLY_HAPPINESS_PENALTY_MAX) + army effectiveness < 1
+const GOODS_PER_MFG_LEVEL           = 1.0;  // goods units produced per manufacturing level per turn
+const GOODS_PER_MILLION_POP         = 0.5;  // goods units demanded per million civilians per turn
+const GOODS_PER_ARMY_STRENGTH       = 1.5;  // goods units demanded per army strength unit per turn
+const SUPPLY_HAPPINESS_PENALTY_MAX  = 10;   // max happiness penalty when supply ratio = 0
+
+// Province installations (Phase 5.3)
+// Airfield + Naval Base implemented now; Fortifications + Supply Depot deferred.
+// Build cost scales: each additional same type in the same province costs more.
+const INSTALLATION_TYPES = {
+  airfield:  { name: 'Airfield',   icon: '✈️', buildCost: 200, maintenance: 1.0, requiresCoastal: false },
+  navalBase: { name: 'Naval Base', icon: '⚓', buildCost: 300, maintenance: 1.5, requiresCoastal: true  },
+};
+const INSTALLATION_BUILD_COST_SCALE = 0.5;  // +50% build cost per existing same type in same province
+
+// Merchant fleet (Phase 5.4)
+// Fleet grows each turn from active trade routes + Commerce level investment.
+// Fleet level caps total trade throughput: income multiplied down if volume > capacity.
+// Growth = activeRoutes × MERCHANT_FLEET_ROUTE_GROW + commerceLevel × MERCHANT_FLEET_COMMERCE_GROW
+const MERCHANT_FLEET_ROUTE_GROW     = 0.5;   // fleet levels gained per active route per turn
+const MERCHANT_FLEET_COMMERCE_GROW  = 0.05;  // fleet levels gained per Commerce level point per turn
+const MERCHANT_FLEET_DECAY_RATE     = 0.3;   // fleet levels lost per turn (obsolescence)
+const MERCHANT_FLEET_BASE_CEILING   = 50;    // max fleet level without Merchant Shipping project
+const MERCHANT_FLEET_CAPACITY_PER_LEVEL = 2.0; // $M/turn trade capacity per fleet level
+
+// Sea control (Phase 5.4)
+// Enemy navy strength in a sea zone comes from AI nations that border that zone.
+// Naval Base staging bonus: commander patrolling a zone with an adjacent Naval Base gets bonus strength.
+const NAVY_PRESENCE_FACTOR       = 0.05;  // AI nation militaryLevel × this = enemy navy strength in adjacent zone
+const NAVAL_BASE_STAGING_BONUS   = 0.30;  // +30% commander effective strength when adjacent Naval Base exists
+
+// Air Force operations (Phase 5.5)
+// Fighters provide air superiority — their strength counts toward sea zone or province control.
+// Bombers conduct strategic bombing — slowly drains target nation militaryLevel.
+// Range is measured in province-adjacency hops from the nearest player Airfield.
+const AIR_SUPERIORITY_RANGE       = 4;     // hops from Airfield to sea-zone coastal province
+const STRATEGIC_BOMBING_RANGE     = 6;     // hops from Airfield to target nation province
+const AIR_SEA_STRENGTH_FACTOR     = 0.5;   // air superiority strength counts as 0.5× navy for sea control
+const STRATEGIC_BOMBING_DRAIN     = 0.002; // militaryLevel drained per effective strength per turn
+
+// Province-level routing (Phase 5.6)
+// Trade routes pass through intermediate provinces; their infra quality can only penalise income.
+// Supply flows from the capital outward; each province hop loses a fraction of delivery efficiency.
+const ROUTE_PATH_INFRA_REFERENCE  = 5;    // infraLevel at or above this = no penalty (multiplier 1.0)
+const SUPPLY_DISTANCE_DECAY       = 0.10; // fraction of supply lost per province hop from capital
+
+// Ground unit system (Phase 5.7a)
+// Max unit size the player can recruit in a single order.
+const UNIT_MAX_SIZE = 20;
+// If a commander's total unit upkeep exceeds their budget, units are "underfunded".
+// Underfunded units' effective combat power is reduced in 5.7c; here it only triggers a warning.
+const UNIT_UNDERFUND_WARNING_THRESHOLD = 0.01; // M/turn shortfall before a warning fires
+
+// Ground unit movement (Phase 5.7b)
+// turnsPerHop = ceil(UNIT_MOVEMENT_BASE_TURNS / unitSpeed)
+// Speed values from UNIT_TYPES range 1 (Artillery) to 8 (Recon), giving:
+//   Recon/speed-8  → 1 turn/hop   Artillery/speed-1 → 6 turns/hop
+const UNIT_MOVEMENT_BASE_TURNS = 6;
+
+// War & siege constants (Phase 5.7c)
+// Siege progress: net (attack - defense) is divided by this to get % change per turn.
+// e.g. net=100 with divisor=10 → 10% progress per turn → capture in ~10 turns if unchallenged.
+const SIEGE_PROGRESS_DIVISOR         = 10;
+// Fraction of unit size lost per turn when outgunned (applied proportionally).
+const SIEGE_CASUALTY_RATE            = 0.04;
+// Treasury drain per active war per turn (M gold).
+const WAR_TREASURY_DRAIN_PER_TURN    = 5;
+// Happiness penalty subtracted from target while at war, per active war.
+const WAR_HAPPINESS_PENALTY          = 8;
+// Base unit size per province when initialising AI militaries.
+const AI_UNIT_SIZE_PER_PROVINCE      = 8;
+// Minimum total AI attack strength before a commander attempts to counter-attack.
+const AI_COUNTER_ATTACK_THRESHOLD    = 20;
+// Fraction of a nation's provinces that must be occupied before they request peace.
+const SUE_FOR_PEACE_THRESHOLD        = 0.6;
+// Attack bonus (multiplicative) if player had forces staged at the border when war was declared.
+const STAGING_ATTACK_BONUS           = 0.25;
+
+// Trade routes
+const TRADE_ROUTE_MATURITY_TURNS       = 50;    // turns for route to reach full maturity
+
+// Trade volume & income
+// Max export/import volume for a resource = round(TRADE_VOLUME_BASE × nation demand/supply mult)
+const TRADE_VOLUME_BASE                = 10;    // base max volume (Mt) before demand/supply multiplier
+
+// Base export income per Mt traded at quality 1.0, full maturity — per resource type ($M/turn per Mt)
+const RESOURCE_EXPORT_PRICE = {
+  iron:       0.08,
+  coal:       0.06,
+  timber:     0.07,
+  steel:      0.15,
+  oil:        0.40,
+  chemicals:  0.25,
+  copper:     0.20,
+  silicon:    0.35,
+  rareEarths: 0.80,
+};
+// Import saving as a fraction of RESOURCE_EXPORT_PRICE per Mt of supply shortfall
+// Saving = price × FRAC × (1 − importQuality) × maturityMult
+const RESOURCE_IMPORT_SAVING_FRAC      = 0.30;
+
+// Trade negotiation — nation offer quality
+// exportQuality = clamp(BASE + (leverage/3)×LEVERAGE + pushCount×PUSH + threaten?THREATEN:0, MIN, MAX)
+const TRADE_OFFER_QUALITY_BASE         = 0.4;
+const TRADE_OFFER_QUALITY_LEVERAGE     = 0.4;   // max bonus from leverage (at leverage=3)
+const TRADE_OFFER_QUALITY_PUSH         = 0.08;  // bonus per push round
+const TRADE_OFFER_QUALITY_THREATEN     = 0.08;  // extra bonus when threatening
+const TRADE_OFFER_QUALITY_MIN          = 0.25;
+const TRADE_OFFER_QUALITY_MAX          = 1.2;
+
+// Trade negotiation — import price (what nation wants back; stored, used in Phase 3.5)
+const TRADE_IMPORT_PRICE_BASE          = 0.6;   // base multiplier
+const TRADE_IMPORT_PRICE_PUSH          = 0.08;  // increases per push
+const TRADE_IMPORT_PRICE_MAX           = 1.2;
+
+// Trade negotiation — push costs (immediate relations penalty)
+const TRADE_PUSH_RELATIONS_BASE        = 3;     // base -relations per push
+const TRADE_PUSH_RELATIONS_SCALE       = 1;     // extra per push count
+const TRADE_PUSH_THREATEN_RELATIONS    = 3;     // extra -relations when threatening
+const TRADE_PUSH_THREATEN_REL_SCALE    = 1;     // extra per push count when threatening
+
+// Trade negotiation — collapse risk (resolved at end of turn)
+// risk = max(0, pushCount×PER_PUSH − leverage×LEVERAGE_REDUCE + threaten?ADD:0)
+const TRADE_COLLAPSE_RISK_PER_PUSH     = 0.12;  // 12% per push
+const TRADE_COLLAPSE_LEVERAGE_REDUCE   = 0.08;  // -8% per leverage point
+const TRADE_COLLAPSE_THREATEN_ADD      = 0.05;  // +5% when threatening
+
+// Trade negotiation — straight-accept probability (best outcome, requires pushCount >= 1)
+const TRADE_STRAIGHT_ACCEPT_BASE       = 0.05;  // 5% base chance
+const TRADE_STRAIGHT_ACCEPT_LEVERAGE   = 0.15;  // +15% per leverage point above 1.0
+const TRADE_STRAIGHT_ACCEPT_RELATIONS  = 0.005; // +0.5% per relations point above 0 (neutral)
+
+// Province map
+// Nation GDP = Σ(province.development) × GDP_PER_PROVINCE_DEVELOPMENT across all owned provinces.
+// Province development is static data (1–5); it represents structural economic capacity.
+const GDP_PER_PROVINCE_DEVELOPMENT = 100;   // $B GDP contributed per development level
 
 // Population
 const POPULATION_START            = 10;     // starting population (millions)
@@ -72,5 +217,65 @@ const POPULATION_COST_EXPONENT    = 0.7;    // sub-linear exponent for healthcar
 const MILITARY_MANPOWER_RATIO     = 25;     // soft military strength cap per million citizens
 
 // AI Nations — per-turn tick behaviour (same for all nations in Phase 3.1)
-const NATION_MILITARY_DRIFT_RATE  = 0.05;   // fraction of gap closed per turn toward starting militaryLevel
-const NATION_RELATIONS_DRIFT_RATE = 0.2;    // points/turn relations drifts back toward 50 (neutral)
+const NATION_MILITARY_DRIFT_RATE            = 0.05;  // fraction of gap closed per turn toward starting militaryLevel
+const NATION_RELATIONS_NEG_PENALTY_RECOVERY = 2;     // points/turn the negotiation penalty recovers toward 0 (neutral)
+const NATION_RELATIONS_BROKEN_ROUTE_TURNS   = 5;     // turns a broken-route penalty takes to fully expire
+
+// Diplomacy Deals — Phase 4.4
+const NAP_DURATION             = 20;   // turns a Non-Aggression Pact lasts
+const ALLIANCE_MIN_PROPOSE_REL = 40;   // minimum relations score to propose an alliance
+const NAP_MIN_PROPOSE_REL      = 0;    // minimum relations score to propose a NAP
+const ALLIANCE_ACCEPT_REL      = 50;   // AI accepts an alliance proposal at this relations level or above
+const NAP_ACCEPT_REL           = 0;    // AI accepts a NAP proposal at this relations level or above
+const ALLIANCE_BREAK_PENALTY   = -25;  // added to relationsNegPenalty when breaking an alliance
+const ALLIANCE_RELATIONS_FLOOR = 20;   // allied nations' relations can't drop below this (Friendly tier)
+const ALLIANCE_RELATIONS_BONUS = 3;    // flat bonus added to allied nations' score in computeNationRelations
+
+// Resource Deposits — Phase 3.5
+// Prospecting policy builds G.prospectingLevel (0–100); level drives per-turn discovery chance.
+const PROSPECT_BASE_CHANCE        = 0.01;   // 1% base chance per turn
+const PROSPECT_LEVEL_SCALE        = 0.0015; // +0.15% per prospecting level (at 10 → ~2.5%)
+const PROSPECT_DIMINISH_RATE      = 0.15;   // each deposit reduces chance by 15% multiplicatively
+
+// Deposit development: each deposit starts as an anomaly and is developed in funded stages.
+// Tier order: occurrence → vein → deposit → reserve → majorReserve
+// Statuses: anomaly → surveying → commissioning → producing (or upgrading → commissioning)
+const DEPOSIT_SURVEY_COST         = 50;    // $M total cost to complete an initial survey
+
+// Commissioning cost per tier ($M) — paid after survey/successful upgrade, guaranteed
+const DEPOSIT_COMMISSION_COST     = { occurrence: 50, vein: 100, deposit: 200, reserve: 400, majorReserve: 800 };
+
+// Upgrade attempt cost per tier transition ($M, 25% success chance):
+const DEPOSIT_TIER_UPGRADE_COST   = { occurrence: 100, vein: 200, deposit: 400, reserve: 800 };
+
+// Mt/yr produced by each tier when in 'producing' status:
+const DEPOSIT_TIER_OUTPUT         = { occurrence: 1, vein: 5, deposit: 15, reserve: 40, majorReserve: 100 };
+
+const DEPOSIT_UPGRADE_SUCCESS     = 0.25;  // 25% success chance when upgrade progress hits 100%
+const DEPOSIT_PROGRESS_DECAY      = 2.0;   // % per turn, for in-progress (unfunded) deposits
+// Max-tier distribution weights for newly detected anomalies:
+const DEPOSIT_MAX_TIER_WEIGHTS    = [35, 30, 20, 10, 5]; // occurrence / vein / deposit / reserve / majorReserve
+
+// Equipment Design (Phase 5.7e)
+// Refit cost = max(BASE_REFIT_COST, totalUnitSizesOfType × costPerSize × FRACTION)
+const EQUIPMENT_REFIT_COST_FRACTION  = 0.40;  // fraction of recruitment cost per size unit
+const EQUIPMENT_REFIT_BASE_COST      = 50;    // minimum refit cost ($M) with no existing units
+const EQUIPMENT_REFIT_TURNS_PER_TIER = 5;     // turns per single tier jump (Mk.I→Mk.II = 5 turns)
+// Army deterrence: sum of ready unit effective attack power / this = army's 0→ARMY_STRENGTH_MAX contribution
+const ARMY_DETERRENCE_ATTACK_SCALE   = 10;    // attack-power divisor for deterrence normalisation
+// Navy/Air deterrence (Phase 5.7f): total unit attack / scale = contribution (0 → STRENGTH_MAX)
+const NAVY_DETERRENCE_ATTACK_SCALE   = 5;     // total naval attack ÷ 5 = navy strength (capped at 25)
+const AIR_DETERRENCE_ATTACK_SCALE    = 5;     // total air attack ÷ 5 = air strength   (capped at 25)
+// Army happiness penalty: min(ARMY_HAPPINESS_PENALTY, totalReadyUnitSizes × PER_SIZE)
+const ARMY_HAPPINESS_PER_UNIT_SIZE   = 0.05;  // happiness penalty per total unit-size in service
+
+// Production queue (Phase 5.7f)
+// All naval and air unit production goes through a global queue.
+// Only one item is actively produced at a time.  Supply shortfall slows production.
+const PRODUCTION_SUPPLY_SLOW_THRESHOLD = 0.5;  // if supplyRatio < this, production speed = supplyRatio
+
+// Commander assessments (Phase 5.7f)
+// Semi-automatic brain: each commander posts one recommendation per interval if no pending one exists.
+const COMMANDER_ASSESSMENT_INTERVAL   = 3;     // turns between assessment regeneration per commander
+const COMMANDER_ASSESS_RECRUIT_THRESHOLD = 20; // recommend recruit if total ready attack < this
+const COMMANDER_ASSESS_BUDGET_THRESHOLD  = 5;  // recommend budget increase if shortfall > this M/turn

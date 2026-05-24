@@ -4,24 +4,49 @@
 
 function getTechEffects() {
   const e = {
-    gdpGrowthBonus:        0,
-    happinessBonus:        0,
-    rpResearchCentreBonus: 0,
-    allPolicyCostMult:     1.0,
-    policyCostMult:        {},
-    techCostMult:          1.0,
-    infraDecayMult:        1.0,
-    infraGrowthMult:       1.0,
+    gdpGrowthBonus:                0,
+    happinessBonus:                0,
+    rpResearchCentreBonus:         0,
+    allPolicyCostMult:             1.0,
+    policyCostMult:                {},
+    techCostMult:                  1.0,
+    infraDecayMult:                1.0,
+    infraGrowthMult:               1.0,
+    industrialGrowthMult:          1.0,   // applies to mining + manufacturing growth rate
+    industrialDecayMult:           1.0,   // applies to mining + manufacturing decay rate
+    tradeExportQualityBonus:       0,     // flat bonus to base export quality in negotiations
+    tradeImportPriceReduction:     0,     // flat reduction to base import asking price
+    culturalExchangeRelationsBonus: 0,    // bonus relations score per active trade route
+    cultureDiplomacyRelationsBonus: 0,    // flat relations bonus to all nations from Cultural Diplomacy tech
+    unRelationsBonus:               0,    // flat relations bonus to all nations from UN Membership tech
+    // Equipment / military tech bonuses (Phase 5.7e)
+    unitAttackBonus:       0,     // additive multiplier bonus on all ground unit attack (e.g. 0.10 = +10%)
+    unitDefenseBonus:      0,     // additive multiplier bonus on all ground unit defense
+    mechanisedCombatBonus: 0,     // bonus for armoredCorps + mechanizedInfantry only
+    deterrenceBonus:       0,     // flat deterrence rating bonus (e.g. nuclearDeterrence +40)
+    equipmentRefitCostMult: 1.0,  // multiplicative; <1 reduces refit costs
   };
   for (const id of G.unlockedTechs) {
     const fx = TECHNOLOGIES[id].effects;
-    if (fx.gdpGrowthBonus)        e.gdpGrowthBonus        += fx.gdpGrowthBonus;
-    if (fx.happinessBonus)        e.happinessBonus        += fx.happinessBonus;
-    if (fx.rpResearchCentreBonus) e.rpResearchCentreBonus += fx.rpResearchCentreBonus;
-    if (fx.allPolicyCostMult)     e.allPolicyCostMult     *= fx.allPolicyCostMult;
-    if (fx.techCostMult)          e.techCostMult          *= fx.techCostMult;
-    if (fx.infraDecayMult)        e.infraDecayMult        *= fx.infraDecayMult;
-    if (fx.infraGrowthMult)       e.infraGrowthMult       *= fx.infraGrowthMult;
+    if (fx.gdpGrowthBonus)                e.gdpGrowthBonus                += fx.gdpGrowthBonus;
+    if (fx.happinessBonus)                e.happinessBonus                += fx.happinessBonus;
+    if (fx.rpResearchCentreBonus)         e.rpResearchCentreBonus         += fx.rpResearchCentreBonus;
+    if (fx.allPolicyCostMult)             e.allPolicyCostMult             *= fx.allPolicyCostMult;
+    if (fx.techCostMult)                  e.techCostMult                  *= fx.techCostMult;
+    if (fx.infraDecayMult)                e.infraDecayMult                *= fx.infraDecayMult;
+    if (fx.infraGrowthMult)               e.infraGrowthMult               *= fx.infraGrowthMult;
+    if (fx.industrialGrowthMult)          e.industrialGrowthMult          *= fx.industrialGrowthMult;
+    if (fx.industrialDecayMult)           e.industrialDecayMult           *= fx.industrialDecayMult;
+    if (fx.tradeExportQualityBonus)       e.tradeExportQualityBonus       += fx.tradeExportQualityBonus;
+    if (fx.tradeImportPriceReduction)     e.tradeImportPriceReduction     += fx.tradeImportPriceReduction;
+    if (fx.culturalExchangeRelationsBonus) e.culturalExchangeRelationsBonus += fx.culturalExchangeRelationsBonus;
+    if (fx.cultureDiplomacyRelationsBonus) e.cultureDiplomacyRelationsBonus += fx.cultureDiplomacyRelationsBonus;
+    if (fx.unRelationsBonus)               e.unRelationsBonus               += fx.unRelationsBonus;
+    if (fx.unitAttackBonus)               e.unitAttackBonus               += fx.unitAttackBonus;
+    if (fx.unitDefenseBonus)              e.unitDefenseBonus              += fx.unitDefenseBonus;
+    if (fx.mechanisedCombatBonus)         e.mechanisedCombatBonus         += fx.mechanisedCombatBonus;
+    if (fx.deterrenceBonus)               e.deterrenceBonus               += fx.deterrenceBonus;
+    if (fx.equipmentRefitCostMult)        e.equipmentRefitCostMult        *= fx.equipmentRefitCostMult;
     if (fx.policyCostMult) {
       for (const [k, v] of Object.entries(fx.policyCostMult)) {
         e.policyCostMult[k] = (e.policyCostMult[k] || 1) * v;
@@ -104,7 +129,7 @@ function getTotalNetIncome() {
   const pe = getProjectEffects();
   const interestRate = G.treasury < 0 ? getDebtInterestRate() : getSavingsInterestRate();
   const interest = G.treasury * interestRate;
-  return getNetIncome() - getProjectFundingTotal() + getTotalTradeIncome() + interest + pe.passiveIncome;
+  return getNetIncome() - getProjectFundingTotal() + getTotalTradeIncome() + interest + pe.passiveIncome - getTotalInstallationMaintenance();
 }
 
 // Effects from completed projects — research, infra, trade, and GDP bonuses.
@@ -197,10 +222,16 @@ function getEffectiveGrowthRate() {
 // The actual G.happiness pool converges toward this target slowly each turn.
 function calcHappinessTarget() {
   let h = HAPPINESS_BASELINE;
-  // Social policy levels contribute happiness based on accumulated investment
   h += HEALTHCARE_HAPPINESS_MAX * (G.healthcareLevel / 100);
   h += EDUCATION_HAPPINESS_MAX  * (G.educationLevel  / 100);
-  h -= MILITARY_HAPPINESS_PENALTY * (G.militaryLevel / 100);
+  // Army happiness penalty — based on total unit sizes in service (Phase 5.7e)
+  const armyUnitSizes = (G.commanders || [])
+    .filter(c => c.branch === 'army')
+    .reduce((sum, c) => sum + (c.units || []).reduce((s, u) =>
+      s + (u.status === 'ready' || u.status === 'recruiting' || u.status === 'refitting' ? u.size : 0), 0), 0);
+  h -= Math.min(ARMY_HAPPINESS_PENALTY, armyUnitSizes * ARMY_HAPPINESS_PER_UNIT_SIZE);
+  h -= getSupplyHappinessPenalty();
+  h -= (G.wars?.length || 0) * WAR_HAPPINESS_PENALTY;
   // Tax: 0% gives +15 happiness, 15% neutral, higher = penalty
   h -= Math.round((G.taxRate - 0.15) * 100);
   h += getTechEffects().happinessBonus;
@@ -232,21 +263,1050 @@ function getRpPerTurn() {
   return (base + eduBonus + techBonus) * pe.researchSpeedMult;
 }
 
-// Income for a single route: ramps linearly from $0 to TRADE_ROUTE_INCOME_MAX over TRADE_ROUTE_MATURITY_TURNS.
+// Leverage of the player over a nation during negotiation.
+// leverage = clamp(deterrenceRating / nationMilitaryLevel × relations/50, 0.1, 3.0)
+// A nation with no military (level 0) is treated as level 1 to avoid division by zero.
+function getTradeNegotiationLeverage(nationId) {
+  const ns  = G.nations[nationId];
+  const def = NATIONS[nationId];
+  const milRatio = getDeterrenceRating() / Math.max(1, def.militaryLevel);
+  const relFactor = (ns.relations + 100) / 100;
+  return Math.max(0.1, Math.min(3.0, milRatio * relFactor));
+}
+
+// Deal quality for a given negotiation round and nation.
+// Higher leverage and more rounds → better deal.
+function getTradeNegotiationDealQuality(nationId, round) {
+  const leverage = getTradeNegotiationLeverage(nationId);
+  const q = TRADE_OFFER_QUALITY_BASE
+    + (leverage / 3) * TRADE_OFFER_QUALITY_LEVERAGE
+    + (round - 1)   * TRADE_OFFER_QUALITY_PUSH;
+  return Math.max(TRADE_OFFER_QUALITY_MIN, Math.min(TRADE_OFFER_QUALITY_MAX, q));
+}
+
+// Max export volume (Mt) the player can offer for a given resource to a given nation.
+function getTradeMaxExportVolume(nationId, resourceId) {
+  const mult = (NATIONS[nationId].trade.demandByResource || {})[resourceId] || 0;
+  return Math.max(1, Math.round(TRADE_VOLUME_BASE * mult));
+}
+
+// Max import volume (Mt) a nation can supply for a given resource.
+function getTradeMaxImportVolume(nationId, resourceId) {
+  const mult = (NATIONS[nationId].trade.supplyByResource || {})[resourceId] || 0;
+  return Math.max(1, Math.round(TRADE_VOLUME_BASE * mult));
+}
+
+// Nation's counter offer for a given push state.
+// exportQuality: what they pay per unit of player's exports (higher = more income for player).
+// importQuality: their asking price per unit supplied (lower = more savings for player).
+function getNationCounterOffer(nationId, pushCount, threatened) {
+  const leverage = getTradeNegotiationLeverage(nationId);
+  const te = getTechEffects();
+  const exportQuality = Math.max(TRADE_OFFER_QUALITY_MIN, Math.min(TRADE_OFFER_QUALITY_MAX,
+    TRADE_OFFER_QUALITY_BASE + te.tradeExportQualityBonus
+    + (leverage / 3) * TRADE_OFFER_QUALITY_LEVERAGE
+    + pushCount * TRADE_OFFER_QUALITY_PUSH
+    + (threatened ? TRADE_OFFER_QUALITY_THREATEN : 0)
+  ));
+  const importQuality = Math.min(TRADE_IMPORT_PRICE_MAX, Math.max(0.1,
+    TRADE_IMPORT_PRICE_BASE - te.tradeImportPriceReduction + pushCount * TRADE_IMPORT_PRICE_PUSH
+  ));
+  return { exportQuality, importQuality };
+}
+
+// Collapse risk if the player has pushed pushCount times (including this push).
+function getPushCollapseRisk(nationId, pushCount, threatened) {
+  const leverage = getTradeNegotiationLeverage(nationId);
+  return Math.max(0, Math.min(0.95,
+    pushCount * TRADE_COLLAPSE_RISK_PER_PUSH
+    - leverage * TRADE_COLLAPSE_LEVERAGE_REDUCE
+    + (threatened ? TRADE_COLLAPSE_THREATEN_ADD : 0)
+  ));
+}
+
+// Relations cost applied immediately when the player pushes.
+function getPushRelationsCost(pushCount, threatened) {
+  const base  = TRADE_PUSH_RELATIONS_BASE  + pushCount * TRADE_PUSH_RELATIONS_SCALE;
+  const extra = threatened ? TRADE_PUSH_THREATEN_RELATIONS + pushCount * TRADE_PUSH_THREATEN_REL_SCALE : 0;
+  return base + extra;
+}
+
+// Probability the nation straight-up accepts on the next response (requires pushCount >= 1).
+function getStraightAcceptChance(nationId, pushCount) {
+  if (pushCount < 1) return 0;
+  const leverage = getTradeNegotiationLeverage(nationId);
+  const ns = G.nations[nationId];
+  return Math.max(0, Math.min(0.7,
+    TRADE_STRAIGHT_ACCEPT_BASE
+    + Math.max(0, leverage - 1.0) * TRADE_STRAIGHT_ACCEPT_LEVERAGE
+    + Math.max(0, ns.relations) * TRADE_STRAIGHT_ACCEPT_RELATIONS
+  ));
+}
+
+// Total resource output (Mt/yr) across all established industry pools.
+function getPlayerResourceOutput() {
+  const out = {};
+  for (const [rid, data] of Object.entries(G.establishedIndustries || {})) {
+    out[rid] = data.totalOutput || 0;
+  }
+  return out;
+}
+
+// Export income from a route: player's resource surplus × nation demand × quality × maturity.
+function getTradeRouteExportIncome(route) {
+  if (!route.nationId || !NATIONS[route.nationId]) return 0;
+  const maturityMult = Math.min(1, route.maturity / TRADE_ROUTE_MATURITY_TURNS);
+  const eq = route.exportQuality || 0;
+  const playerOutput = getPlayerResourceOutput();
+  const demands = NATIONS[route.nationId].trade.demandByResource || {};
+  let income = 0;
+  for (const [rid, demandMult] of Object.entries(demands)) {
+    const maxDemandVol = Math.max(1, Math.round(TRADE_VOLUME_BASE * demandMult));
+    const available   = playerOutput[rid] || 0;
+    const exportVol   = Math.min(available, maxDemandVol);
+    if (exportVol > 0) {
+      income += exportVol * (RESOURCE_EXPORT_PRICE[rid] || 0) * eq * maturityMult;
+    }
+  }
+  return income;
+}
+
+// Import saving from a route: nation supplies resources the player lacks, reducing effective import cost.
+// saving = shortfall × price × RESOURCE_IMPORT_SAVING_FRAC × (1 − importQuality) × maturity
+// Lower importQuality = cheaper rate negotiated = more savings.
+function getTradeRouteImportSaving(route) {
+  if (!route.nationId || !NATIONS[route.nationId]) return 0;
+  const maturityMult = Math.min(1, route.maturity / TRADE_ROUTE_MATURITY_TURNS);
+  const iq = route.importQuality || 0;
+  const savingMult = Math.max(0, 1 - iq);
+  if (savingMult <= 0) return 0;
+  const playerOutput = getPlayerResourceOutput();
+  const supplies = NATIONS[route.nationId].trade.supplyByResource || {};
+  let saving = 0;
+  for (const [rid, supplyMult] of Object.entries(supplies)) {
+    const maxSupplyVol = Math.max(1, Math.round(TRADE_VOLUME_BASE * supplyMult));
+    const playerHas   = playerOutput[rid] || 0;
+    const shortfall   = Math.max(0, maxSupplyVol - playerHas);
+    if (shortfall > 0) {
+      saving += shortfall * (RESOURCE_EXPORT_PRICE[rid] || 0) * RESOURCE_IMPORT_SAVING_FRAC * savingMult * maturityMult;
+    }
+  }
+  return saving;
+}
+
+// Combined export income + import savings for a route, reduced by sea zone disruption.
 function getTradeRouteIncome(route) {
-  return TRADE_ROUTE_INCOME_MAX * Math.min(1, route.maturity / TRADE_ROUTE_MATURITY_TURNS);
+  const base = getTradeRouteExportIncome(route) + getTradeRouteImportSaving(route);
+  return base * getRouteSeaControlMultiplier(route) * getRoutePathEfficiencyMultiplier(route);
 }
 
-// Total trade income across all active routes, multiplied by Seaport Expansion bonus if complete.
+// ============================================================
+// MERCHANT FLEET & SEA CONTROL (Phase 5.4)
+// ============================================================
+
+// Maximum merchant fleet level (base ceiling, raised by future Merchant Shipping projects).
+function getMerchantFleetCeiling() {
+  return MERCHANT_FLEET_BASE_CEILING;  // projects will add bonuses in Phase 6
+}
+
+// Trade throughput capacity this fleet level provides ($M/turn).
+function getMerchantFleetCapacity() {
+  return (G.merchantFleet || 0) * MERCHANT_FLEET_CAPACITY_PER_LEVEL;
+}
+
+// Capacity multiplier applied to total trade income.
+// If total raw trade income < capacity, multiplier = 1 (no bottleneck).
+// If income > capacity, all routes are proportionally reduced.
+function getMerchantFleetCapacityMultiplier() {
+  const capacity = getMerchantFleetCapacity();
+  if (capacity <= 0) return 0;  // no fleet = no trade
+  const rawTotal = G.tradeRoutes.reduce((sum, r) => {
+    const base = getTradeRouteExportIncome(r) + getTradeRouteImportSaving(r);
+    return sum + base;
+  }, 0);
+  if (rawTotal <= 0) return 1;
+  return Math.min(1, capacity / rawTotal);
+}
+
+// Raw attack contribution of all ready naval units in a commander (before bonuses).
+// Carrier fleetMultiplierBonus applies to the sum of all other units in the same commander.
+function getNavyCommanderRawAttack(commander) {
+  const units = (commander.units || []).filter(u => u.status === 'ready');
+  if (units.length === 0) return 0;
+  let baseSum = 0;
+  let carrierBonus = 0;
+  for (const u of units) {
+    const def = NAVAL_UNIT_TYPES[u.type];
+    if (!def) continue;
+    const contribution = def.attack * u.size;
+    baseSum += contribution;
+    if (def.fleetMultiplierBonus) {
+      // Carrier's own attack contributes, but its bonus is applied to others
+      // Track it separately to avoid self-multiplication
+    }
+  }
+  // Apply carrier fleet multiplier bonus
+  for (const u of units) {
+    const def = NAVAL_UNIT_TYPES[u.type];
+    if (def?.fleetMultiplierBonus) {
+      // Bonus applies to all other units' contributions
+      const otherAttack = units
+        .filter(ou => ou.id !== u.id)
+        .reduce((s, ou) => {
+          const od = NAVAL_UNIT_TYPES[ou.type];
+          return s + (od ? od.attack * ou.size : 0);
+        }, 0);
+      carrierBonus += otherAttack * def.fleetMultiplierBonus;
+    }
+  }
+  return baseSum + carrierBonus;
+}
+
+// Effective strength of a single navy commander.
+// For tradeProtection missions, applies Naval Base staging bonus.
+function getNavyCommanderEffectiveStrength(commander) {
+  const rawAttack = getNavyCommanderRawAttack(commander);
+  if (rawAttack === 0) return 0;
+  if (commander.mission !== 'tradeProtection' || !commander.target) return rawAttack;
+  const zone = SEA_PROVINCES[commander.target];
+  if (!zone) return rawAttack;
+  const hasAdjacentBase = G.installations.some(inst => {
+    if (inst.type !== 'navalBase') return false;
+    const prov = PROVINCES[inst.provinceId];
+    return prov && prov.coastal && prov.nationId === 'player';
+  });
+  return rawAttack * (hasAdjacentBase ? (1 + NAVAL_BASE_STAGING_BONUS) : 1);
+}
+
+// Sum of effective navy + air superiority strength assigned to a zone.
+function getPlayerNavyStrengthForZone(zoneId) {
+  const navyStr = (G.commanders || [])
+    .filter(c => c.branch === 'navy' && c.mission === 'tradeProtection' && c.target === zoneId)
+    .reduce((sum, c) => sum + getNavyCommanderEffectiveStrength(c), 0);
+  const airStr = getPlayerAirStrengthForZone(zoneId);
+  return navyStr + airStr;
+}
+
+// Enemy navy strength in a sea zone from bordering AI nations' military levels.
+function getEnemyNavyStrengthForZone(zoneId) {
+  const zone = SEA_PROVINCES[zoneId];
+  if (!zone || !zone.adjacentNations) return 0;
+  return zone.adjacentNations.reduce((sum, nationId) => {
+    const ns = G.nations[nationId];
+    return sum + ((ns ? ns.militaryLevel : 0) * NAVY_PRESENCE_FACTOR);
+  }, 0);
+}
+
+// Sea control ratio for a zone: 0 (enemy dominates) to 1 (player dominates).
+// With no player fleet and no enemy navy, defaults to 1 (open seas, uncontested).
+function getSeaControlForZone(zoneId) {
+  const playerStr = getPlayerNavyStrengthForZone(zoneId);
+  const enemyStr  = getEnemyNavyStrengthForZone(zoneId);
+  if (playerStr === 0 && enemyStr === 0) return 1;
+  return playerStr / (playerStr + enemyStr);
+}
+
+// Income multiplier for a single route based on its sea zone control.
+// Overland routes (seaZone null) are unaffected.
+function getRouteSeaControlMultiplier(route) {
+  if (!route.seaZone) return 1;
+  return getSeaControlForZone(route.seaZone);
+}
+
+// ============================================================
+// AIR FORCE — range, strength, sea control contribution (Phase 5.5)
+// ============================================================
+
+// Province IDs of player Airfields.
+function getAirfieldProvinces() {
+  return (G.installations || [])
+    .filter(i => i.type === 'airfield' && PROVINCES[i.provinceId]?.nationId === 'player')
+    .map(i => i.provinceId);
+}
+
+// BFS over province adjacency. Returns minimum hop count from any startId to any targetId.
+// Returns Infinity if none are reachable.
+function bfsMinHops(startIds, targetIds) {
+  const targetSet = new Set(targetIds);
+  const startArr  = Array.isArray(startIds) ? startIds : [startIds];
+  if (startArr.some(id => targetSet.has(id))) return 0;
+  const visited = new Set(startArr);
+  let frontier  = [...startArr];
+  let hops      = 0;
+  while (frontier.length > 0) {
+    hops++;
+    const next = [];
+    for (const id of frontier) {
+      for (const adj of (PROVINCES[id]?.adjacency || [])) {
+        if (targetSet.has(adj)) return hops;
+        if (!visited.has(adj)) { visited.add(adj); next.push(adj); }
+      }
+    }
+    frontier = next;
+  }
+  return Infinity;
+}
+
+// Coastal province IDs that border a given sea zone (used for range-to-zone checks).
+function getSeaZoneCoastalProvinces(zoneId) {
+  const zone = SEA_PROVINCES[zoneId];
+  if (!zone) return [];
+  const nations = new Set(zone.adjacentNations || []);
+  return Object.entries(PROVINCES)
+    .filter(([, p]) => nations.has(p.nationId) && p.coastal)
+    .map(([id]) => id);
+}
+
+// Returns true if an air mission targeting 'target' is within range of a player Airfield.
+// mission: 'airSuperiority' | 'strategicBombing' | 'airLogistics'
+// target:  sea zone id (airSuperiority) | nation id (strategicBombing) | province id (airLogistics)
+function isAirMissionInRange(mission, target) {
+  if (!target) return false;
+  const airfields = getAirfieldProvinces();
+  if (airfields.length === 0) return false;
+  let targetProvinces;
+  let range;
+  if (mission === 'airSuperiority') {
+    range = AIR_SUPERIORITY_RANGE;
+    targetProvinces = SEA_PROVINCES[target]
+      ? getSeaZoneCoastalProvinces(target)
+      : [target];
+  } else if (mission === 'airLogistics') {
+    range = AIR_SUPERIORITY_RANGE;  // same range as air superiority
+    targetProvinces = [target];     // target is a province id
+  } else {
+    // strategicBombing: any province belonging to the target nation
+    range = STRATEGIC_BOMBING_RANGE;
+    targetProvinces = Object.entries(PROVINCES)
+      .filter(([, p]) => p.nationId === target)
+      .map(([id]) => id);
+  }
+  if (targetProvinces.length === 0) return false;
+  return bfsMinHops(airfields, targetProvinces) <= range;
+}
+
+// Effective strength of an Air Force commander for a given mission (0 if out of range or no Airfield).
+// Each unit type contributes attack × size × missionBonus[mission].  Recon reconBonus stacks.
+function getAirCommanderEffectiveStrength(commander) {
+  if (commander.branch !== 'airForce') return 0;
+  const mission = commander.mission || 'airSuperiority';
+  if (!isAirMissionInRange(mission, commander.target)) return 0;
+  const units = (commander.units || []).filter(u => u.status === 'ready');
+  if (units.length === 0) return 0;
+  let base = 0;
+  let reconBonusMult = 1;
+  for (const u of units) {
+    const def = AIR_UNIT_TYPES[u.type];
+    if (!def) continue;
+    const bonus = def.missionBonus?.[mission] ?? 0;
+    base += def.attack * u.size * bonus;
+    if (def.reconBonus) reconBonusMult += def.reconBonus;
+  }
+  return base * reconBonusMult;
+}
+
+// Air logistics supply bonus contributed to a player province by Transport-equipped commanders.
+// Returns 0–1 additive bonus to the province\'s supply level.
+function getAirLogisticsSupplyBonus(provinceId) {
+  if (!provinceId) return 0;
+  let bonus = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'airForce' || cmd.mission !== 'airLogistics' || cmd.target !== provinceId) continue;
+    if (!isAirMissionInRange('airLogistics', provinceId)) continue;
+    for (const u of (cmd.units || [])) {
+      if (u.status !== 'ready') continue;
+      const def = AIR_UNIT_TYPES[u.type];
+      if (!def) continue;
+      bonus += def.attack * u.size * (def.missionBonus?.airLogistics ?? 0) * 0.02;
+    }
+  }
+  return Math.min(0.5, bonus);  // cap bonus at +50% supply
+}
+
+// Air superiority strength contributed to a sea zone by Air Force commanders.
+// Counts at AIR_SEA_STRENGTH_FACTOR × effective strength (air is less dominant than dedicated navy).
+function getPlayerAirStrengthForZone(zoneId) {
+  return (G.commanders || [])
+    .filter(c => c.branch === 'airForce' && c.mission === 'airSuperiority' && c.target === zoneId)
+    .reduce((sum, c) => sum + getAirCommanderEffectiveStrength(c) * AIR_SEA_STRENGTH_FACTOR, 0);
+}
+
+// ============================================================
+// PROVINCE-LEVEL ROUTING — trade paths + supply from capital (Phase 5.6)
+// ============================================================
+
+// BFS returning the full shortest path as an array of province IDs [start, ..., end].
+// startIds / targetIds can be a single string or array.
+// Returns null if the target is unreachable.
+// Optional restrictToSet: if provided, only expand through provinces in that set
+// (targets are always reachable even if not in the set).
+function bfsPath(startIds, targetIds, restrictToSet) {
+  const targetSet = new Set(Array.isArray(targetIds) ? targetIds : [targetIds]);
+  const startArr  = Array.isArray(startIds) ? startIds : [startIds];
+  // If any start is already in the target set, return it immediately
+  for (const id of startArr) {
+    if (targetSet.has(id)) return [id];
+  }
+  const parent = {};   // provinceId → parent provinceId (null for roots)
+  const visited = new Set(startArr);
+  let frontier = [...startArr];
+  for (const id of startArr) parent[id] = null;
+  let found = null;
+  outer: while (frontier.length > 0) {
+    const next = [];
+    for (const id of frontier) {
+      for (const adj of (PROVINCES[id]?.adjacency || [])) {
+        if (visited.has(adj)) continue;
+        if (restrictToSet && !restrictToSet.has(adj) && !targetSet.has(adj)) continue;
+        visited.add(adj);
+        parent[adj] = id;
+        next.push(adj);
+        if (targetSet.has(adj)) { found = adj; break outer; }
+      }
+    }
+    frontier = next;
+  }
+  if (!found) return null;
+  const path = [];
+  for (let cur = found; cur !== null; cur = parent[cur]) path.unshift(cur);
+  return path;
+}
+
+// Province path from any player province to the nearest province of the given nation.
+// Returns array of province IDs or [] if directly adjacent or unreachable.
+function getTradeRouteLandPath(nationId) {
+  const playerProvs = Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === 'player');
+  const targetProvs = Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === nationId);
+  return bfsPath(playerProvs, targetProvs) || [];
+}
+
+// Path efficiency multiplier for a trade route (penalty-only).
+// Intermediate provinces (neither player nor target nation) contribute an infra penalty
+// when their infraLevel is below ROUTE_PATH_INFRA_REFERENCE.  Max multiplier = 1.0.
+function getRoutePathEfficiencyMultiplier(route) {
+  const path = getTradeRouteLandPath(route.nationId);
+  if (path.length <= 2) return 1; // directly adjacent — no intermediate provinces
+  // Exclude first (player) and last (target) province
+  const intermediate = path.slice(1, -1).filter(id => {
+    const p = PROVINCES[id];
+    return p && p.nationId !== 'player' && p.nationId !== route.nationId;
+  });
+  if (intermediate.length === 0) return 1;
+  const avgInfra = intermediate.reduce((sum, id) => sum + (PROVINCES[id]?.infraLevel || 1), 0) / intermediate.length;
+  return Math.min(1, avgInfra / ROUTE_PATH_INFRA_REFERENCE);
+}
+
+// Capital province for supply routing.  Will become selectable when conquest is added.
+function getCapitalProvinceId() {
+  return 'arvenmoor';
+}
+
+// Supply levels for all player provinces based on hop distance from the capital,
+// travelling only through player-owned provinces.
+// Returns a map: { provinceId: supplyLevel (0–1) }
+function getPlayerProvinceSupplyLevels() {
+  const capital   = getCapitalProvinceId();
+  const playerSet = new Set(Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === 'player'));
+  const distances = { [capital]: 0 };
+  let frontier = [capital];
+  while (frontier.length > 0) {
+    const next = [];
+    for (const id of frontier) {
+      for (const adj of (PROVINCES[id]?.adjacency || [])) {
+        if (!playerSet.has(adj) || distances[adj] !== undefined) continue;
+        distances[adj] = distances[id] + 1;
+        next.push(adj);
+      }
+    }
+    frontier = next;
+  }
+  const levels = {};
+  for (const id of playerSet) {
+    const dist = distances[id] !== undefined ? distances[id] : 99;
+    levels[id] = Math.max(0, 1 - SUPPLY_DISTANCE_DECAY * dist);
+  }
+  return levels;
+}
+
+// Supply level for a single player province (0–1).
+function getProvinceSupplyLevel(provinceId) {
+  return getPlayerProvinceSupplyLevels()[provinceId] ?? 1;
+}
+
+// ============================================================
+// GROUND UNIT HELPERS — Phase 5.7a
+// ============================================================
+
+// Total upkeep cost per turn for all units under a commander (M gold/turn).
+function getCommanderUnitUpkeep(cmd) {
+  return (cmd.units || []).reduce((sum, u) => {
+    const def = UNIT_TYPES[u.type];
+    return sum + (def ? def.upkeepPerSize * u.size : 0);
+  }, 0);
+}
+
+// Gold per turn available after unit upkeep (can be negative = underfunded).
+function getCommanderBudgetFree(cmd) {
+  return (cmd.budget || 0) - getCommanderUnitUpkeep(cmd);
+}
+
+// Sum of all Army commander budgets.
+function getTotalArmyBudgetAllocated() {
+  return (G.commanders || [])
+    .filter(c => c.branch === 'army')
+    .reduce((s, c) => s + (c.budget || 0), 0);
+}
+
+// Total upkeep across all Army commanders' units.
+function getTotalArmyUnitUpkeep() {
+  return (G.commanders || [])
+    .filter(c => c.branch === 'army')
+    .reduce((s, c) => s + getCommanderUnitUpkeep(c), 0);
+}
+
+// Per-turn upkeep cost for a Navy or Air Force commander (ready + producing units).
+// Uses NAVAL_UNIT_TYPES / AIR_UNIT_TYPES.
+function getNavalAirCommanderUnitUpkeep(cmd) {
+  const typeDefs = cmd.branch === 'navy' ? NAVAL_UNIT_TYPES : AIR_UNIT_TYPES;
+  return (cmd.units || []).reduce((sum, u) => {
+    const def = typeDefs[u.type];
+    return sum + (def ? def.upkeepPerSize * u.size : 0);
+  }, 0);
+}
+
+// Total ready naval/air attack power for a commander (used for assessment logic).
+function getNavalAirCommanderReadyAttack(cmd) {
+  const typeDefs = cmd.branch === 'navy' ? NAVAL_UNIT_TYPES : AIR_UNIT_TYPES;
+  return (cmd.units || [])
+    .filter(u => u.status === 'ready')
+    .reduce((sum, u) => {
+      const def = typeDefs[u.type];
+      return sum + (def ? def.attack * u.size : 0);
+    }, 0);
+}
+
+// Ready units only (excluding those still recruiting).
+function getCommanderReadyUnits(cmd) {
+  return (cmd.units || []).filter(u => u.status === 'ready');
+}
+
+// Total combat power (attack or defense) of ready units under a commander.
+// stat = 'attack' | 'defense'
+function getCommanderCombatPower(cmd, stat) {
+  return getCommanderReadyUnits(cmd).reduce((sum, u) => {
+    const def = UNIT_TYPES[u.type];
+    return sum + (def ? (def[stat] || 0) * u.size : 0);
+  }, 0);
+}
+
+// ============================================================
+// UNIT MOVEMENT HELPERS — Phase 5.7b
+// ============================================================
+
+// How many turns a unit of this type takes to advance one province hop.
+// Equipment tier speedBonus is added to base speed (Phase 5.7e).
+function getUnitTurnsPerHop(unitType) {
+  return Math.ceil(UNIT_MOVEMENT_BASE_TURNS / Math.max(1, getEffectiveUnitSpeed(unitType)));
+}
+
+// ── Equipment refit helpers (Phase 5.7e) ──────────────────────────────────────────────────
+
+// Total sizes of a unit type currently across all army commanders (ready + recruiting + refitting).
+function getUnitTypeInServiceSizes(unitType) {
+  let total = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    for (const unit of (cmd.units || [])) {
+      if (unit.type === unitType) total += unit.size;
+    }
+  }
+  return total;
+}
+
+// Treasury cost to refit all existing units of a type to targetTier.
+function getRefitCost(unitType, targetTier) {
+  const te   = getTechEffects();
+  const base = UNIT_TYPES[unitType]?.costPerSize || 0;
+  const sizes = getUnitTypeInServiceSizes(unitType);
+  const raw  = Math.max(EQUIPMENT_REFIT_BASE_COST, sizes * base * EQUIPMENT_REFIT_COST_FRACTION);
+  return Math.round(raw * te.equipmentRefitCostMult);
+}
+
+// Number of turns a refit takes (5 per tier jump).
+function getRefitTurns(currentTier, targetTier) {
+  return EQUIPMENT_REFIT_TURNS_PER_TIER * Math.max(1, targetTier - currentTier);
+}
+
+// The player province an Army commander's units should converge on, based on their order.
+//   'hold'   → capital province
+//   'defend' → the specified player province
+//   'stage'  → the player border province closest to the target nation (BFS path[0])
+function getCommanderDeploymentProvince(cmd) {
+  if (!cmd || cmd.branch !== 'army') return getCapitalProvinceId();
+  const order = cmd.order || { type: 'hold', target: null };
+  if (order.type === 'stage' && order.target) {
+    const path = getTradeRouteLandPath(order.target);
+    return path[0] || getCapitalProvinceId();
+  }
+  if (order.type === 'defend' && order.target) {
+    return order.target;
+  }
+  return getCapitalProvinceId();
+}
+
+// Map of provinceId → array of ready units currently positioned there.
+// Used by the map renderer to draw unit icons.
+function getProvincesWithPlayerUnits() {
+  const result = {};
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready' || !unit.position) continue;
+      if (!result[unit.position]) result[unit.position] = [];
+      result[unit.position].push({ unit, cmd });
+    }
+  }
+  return result;
+}
+
+// Set of player province IDs that are currently designated as staging provinces
+// (commander order = 'stage', units deployed to border province facing the target nation).
+function getStagingProvinces() {
+  const staging = new Set();
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army' || cmd.order?.type !== 'stage') continue;
+    const dep = getCommanderDeploymentProvince(cmd);
+    if (dep) staging.add(dep);
+  }
+  return staging;
+}
+
+// ============================================================
+// WAR & SIEGE HELPERS — Phase 5.7c
+// ============================================================
+
+function isAtWar(nationId) {
+  return (G.wars || []).some(w => w.nationId === nationId);
+}
+
+// Dynamic province owner: respects occupied state (player-occupied shows as 'player').
+// Does NOT reflect formal annexation (use PROVINCES[id].nationId for that).
+function getProvinceEffectiveOwner(provId) {
+  if (G.occupiedProvinces?.[provId]) return 'player';
+  return PROVINCES[provId]?.nationId;
+}
+
+// All provinces that originally (in static data) belong to a nation.
+function getNationProvinces(nationId) {
+  return Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === nationId);
+}
+
+// Provinces currently occupied by the player that originally belonged to nationId.
+function getPlayerOccupiedProvincesOf(nationId) {
+  return Object.entries(G.occupiedProvinces || {})
+    .filter(([, data]) => data.originalOwner === nationId)
+    .map(([id]) => id);
+}
+
+// Fraction of a nation's provinces currently occupied by the player.
+function getOccupiedFraction(nationId) {
+  const total = getNationProvinces(nationId).length;
+  return total === 0 ? 0 : getPlayerOccupiedProvincesOf(nationId).length / total;
+}
+
+// Attack strength contributed by all player units currently in a province.
+function getSiegeAttackStrength(provId) {
+  let atk = 0;
+  let artilleryPresent = false;
+  let artilleryBonus = 0;
+  const unitAttacks = [];
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready' || unit.position !== provId) continue;
+      const ut = UNIT_TYPES[unit.type];
+      if (ut?.supportAttackBonus) {
+        artilleryPresent = true;
+        artilleryBonus = Math.max(artilleryBonus, ut.supportAttackBonus);
+      } else {
+        unitAttacks.push(getEffectiveUnitAttack(unit.type) * unit.size);
+      }
+    }
+  }
+  atk = unitAttacks.reduce((s, v) => s + v, 0);
+  if (artilleryPresent) atk *= (1 + artilleryBonus);
+  return atk;
+}
+
+// Defense strength contributed by all AI units of a nation currently in a province.
+// AI units always use Mk.I stats (no equipment system for AI in Phase 5.7e).
+function getAiDefenseStrength(provId, nationId) {
+  let def = 0;
+  const aiMil = G.aiMilitary?.[nationId];
+  if (!aiMil) return 0;
+  for (const cmd of (aiMil.commanders || [])) {
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready' || unit.position !== provId) continue;
+      def += (UNIT_TYPES[unit.type]?.defense || 0) * unit.size;
+    }
+  }
+  return def;
+}
+
+// Defense strength from all player units in a province (used for AI reverse siege).
+function getPlayerDefenseStrength(provId) {
+  let def = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready' || unit.position !== provId) continue;
+      def += getEffectiveUnitDefense(unit.type) * unit.size;
+    }
+  }
+  return def;
+}
+
+// Nearest unoccupied enemy province that is adjacent to any player-controlled or occupied province.
+// Returns a province ID string, or null if none reachable.
+function getAdvanceTargetProvince(nationId) {
+  const controlled = new Set([
+    ...Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === 'player'),
+    ...Object.keys(G.occupiedProvinces || {}),
+  ]);
+  // BFS outward from controlled territory, looking for unoccupied enemy provinces
+  const visited = new Set(controlled);
+  const frontier = [...controlled];
+  while (frontier.length > 0) {
+    const id = frontier.shift();
+    for (const adj of (PROVINCES[id]?.adjacency || [])) {
+      if (visited.has(adj)) continue;
+      visited.add(adj);
+      if (PROVINCES[adj]?.nationId === nationId && !(G.occupiedProvinces?.[adj])) return adj;
+      frontier.push(adj);
+    }
+  }
+  return null;
+}
+
+// For an AI commander, find the nearest player province to advance toward.
+function getAiCounterAttackTarget(cmd) {
+  const positions = (cmd.units || [])
+    .filter(u => u.status === 'ready' && u.position)
+    .map(u => u.position);
+  if (positions.length === 0) return null;
+  const playerProvs = new Set(Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === 'player'));
+  const visited = new Set(positions);
+  const frontier = [...positions];
+  while (frontier.length > 0) {
+    const id = frontier.shift();
+    for (const adj of (PROVINCES[id]?.adjacency || [])) {
+      if (visited.has(adj)) continue;
+      visited.add(adj);
+      if (playerProvs.has(adj)) return adj;
+      frontier.push(adj);
+    }
+  }
+  return null;
+}
+
+// Province → list of AI units there (for map rendering).
+function getProvincesWithAiUnits(nationId) {
+  const result = {};
+  const aiMil = G.aiMilitary?.[nationId];
+  if (!aiMil) return result;
+  for (const cmd of (aiMil.commanders || [])) {
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready' || !unit.position) continue;
+      if (!result[unit.position]) result[unit.position] = [];
+      result[unit.position].push({ unit, cmd });
+    }
+  }
+  return result;
+}
+
+// Total trade income across all active routes, with sea control and fleet capacity applied.
 function getTotalTradeIncome() {
-  const pe = getProjectEffects();
-  return G.tradeRoutes.reduce((sum, r) => sum + getTradeRouteIncome(r), 0) * pe.tradeIncomeMult;
+  const pe       = getProjectEffects();
+  const capMult  = getMerchantFleetCapacityMultiplier();
+  const rawTotal = G.tradeRoutes.reduce((sum, r) => sum + getTradeRouteIncome(r), 0);
+  return rawTotal * pe.tradeIncomeMult * capMult;
 }
 
-// Military strength: scales with accumulated militaryLevel, soft-capped by population manpower.
-function getMilitaryStrength() {
-  const raw = MILITARY_STRENGTH_MAX * (G.militaryLevel / 100);
-  return Math.min(raw, G.population * MILITARY_MANPOWER_RATIO);
+// Compute the relations score (-100 to +100) for a nation from all contributing factors.
+// Called at end of each turn after per-turn history is updated.
+function computeNationRelations(nationId) {
+  const ns    = G.nations[nationId];
+  const def   = NATIONS[nationId];
+  const route = G.tradeRoutes.find(r => r.nationId === nationId);
+  let score   = 0;
+
+  // 1. Active trade route presence: +8
+  if (route) score += 8;
+
+  // 2. Route maturity bonus: up to +20 (route.maturity normalised against TRADE_ROUTE_MATURITY_TURNS)
+  if (route) score += Math.round(Math.min(1, route.maturity / TRADE_ROUTE_MATURITY_TURNS) * 20);
+
+  // 3. Import reliance: +4 per resource the nation demands that the player actually produces (max +16)
+  const output = getPlayerResourceOutput();
+  const demand = def.trade.demandByResource || {};
+  const relianceCount = Object.keys(demand).filter(rid => (output[rid] || 0) > 0).length;
+  score += Math.min(relianceCount * 4, 16);
+
+  // 4. Trade volume share: route income as fraction of nation GDP — up to +12
+  if (route) {
+    const income   = getTradeRouteIncome(route);
+    const gdpShare = income / Math.max(1, ns.gdp);
+    score += Math.min(12, Math.round(gdpShare * 500));
+  }
+
+  // 5. First contact bonus: +5, permanent once earned
+  if (ns.relationsFirstContact) score += 5;
+
+  // 6. Streak bonus: +2/turn of consecutive trade, capped at +14
+  score += Math.min(14, Math.floor(ns.relationsStreak) * 2);
+
+  // 7. Negotiation pressure penalty (stored as a negative value; recovers over time)
+  score += ns.relationsNegPenalty;
+
+  // 8. Broken route penalties: -15 each, recovering +3/turn until expired
+  for (const ev of ns.relationsBrokenRoutes) {
+    const turnsAgo = G.turn - ev.turn;
+    score += Math.min(0, -15 + turnsAgo * 3);
+  }
+
+  // 9. Cultural Exchange tech: flat bonus when active route exists
+  const ceTechFx = getTechEffects();
+  if (route && ceTechFx.culturalExchangeRelationsBonus > 0) score += ceTechFx.culturalExchangeRelationsBonus;
+
+  // 10. Active Alliance: flat per-turn relations bonus
+  const alliance = (G.diplomaticDeals || []).find(d => d.type === 'alliance' && d.nationId === nationId);
+  if (alliance) score += ALLIANCE_RELATIONS_BONUS;
+
+  // 11. Cultural Diplomacy tech: flat bonus to all nations
+  score += ceTechFx.cultureDiplomacyRelationsBonus;
+
+  // 12. UN Membership tech: global relations bonus
+  score += ceTechFx.unRelationsBonus;
+
+  const clamped = Math.max(-100, Math.min(100, Math.round(score)));
+  // Alliance floor: allied nations can never drop below Friendly tier
+  return alliance ? Math.max(ALLIANCE_RELATIONS_FLOOR, clamped) : clamped;
+}
+
+// ── Equipment-aware unit stat helpers (Phase 5.7e) ────────────────────────────────────────
+
+// Effective attack for a unit type: base × equipment tier mult × tech bonuses.
+function getEffectiveUnitAttack(unitType) {
+  const base = UNIT_TYPES[unitType]?.attack || 0;
+  const tier = G.equipmentTiers?.[unitType] || 1;
+  const tf   = EQUIPMENT_TIERS[tier];
+  const te   = getTechEffects();
+  let mult = tf.attackMult * (1 + te.unitAttackBonus);
+  if (unitType === 'armoredCorps' || unitType === 'mechanizedInfantry') mult *= (1 + te.mechanisedCombatBonus);
+  return base * mult;
+}
+
+// Effective defense for a unit type: base × equipment tier mult × tech bonuses.
+function getEffectiveUnitDefense(unitType) {
+  const base = UNIT_TYPES[unitType]?.defense || 0;
+  const tier = G.equipmentTiers?.[unitType] || 1;
+  const tf   = EQUIPMENT_TIERS[tier];
+  const te   = getTechEffects();
+  let mult = tf.defenseMult * (1 + te.unitDefenseBonus);
+  if (unitType === 'armoredCorps' || unitType === 'mechanizedInfantry') mult *= (1 + te.mechanisedCombatBonus);
+  return base * mult;
+}
+
+// Effective speed for a unit type: base speed + equipment tier speedBonus.
+function getEffectiveUnitSpeed(unitType) {
+  const base = UNIT_TYPES[unitType]?.speed || 1;
+  const tier = G.equipmentTiers?.[unitType] || 1;
+  return base + (EQUIPMENT_TIERS[tier]?.speedBonus || 0);
+}
+
+// Military branches (Phase 5.1) ============================================================
+
+// Weighted 0\u2013100 deterrence score: Army 50%, Navy 25%, Air Force 25%.
+// Used for leverage in trade negotiations and the Military screen.
+function getDeterrenceRating() {
+  const armyContrib = getArmyStrength() / ARMY_STRENGTH_MAX * 50;
+  const navyContrib = getNavyStrength() / NAVY_STRENGTH_MAX * 25;
+  const airContrib  = getAirForceStrength() / AIRFORCE_STRENGTH_MAX * 25;
+  const te = getTechEffects();
+  return Math.min(100, armyContrib + navyContrib + airContrib + te.deterrenceBonus);
+}
+
+// Army strength: total effective attack power of ready units, normalised to 0–ARMY_STRENGTH_MAX.
+function getArmyStrength() {
+  let totalAttack = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    for (const unit of (cmd.units || [])) {
+      if (unit.status !== 'ready') continue;
+      totalAttack += getEffectiveUnitAttack(unit.type) * unit.size;
+    }
+  }
+  return Math.min(ARMY_STRENGTH_MAX, totalAttack / ARMY_DETERRENCE_ATTACK_SCALE);
+}
+
+function getNavyStrength() {
+  let totalAttack = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'navy') continue;
+    totalAttack += getNavyCommanderEffectiveStrength(cmd);
+  }
+  return Math.min(NAVY_STRENGTH_MAX, totalAttack / NAVY_DETERRENCE_ATTACK_SCALE);
+}
+
+function getAirForceStrength() {
+  let totalAttack = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'airForce') continue;
+    // Sum across all missions for deterrence (use airSuperiority as proxy)
+    const units = (cmd.units || []).filter(u => u.status === 'ready');
+    for (const u of units) {
+      const def = AIR_UNIT_TYPES[u.type];
+      if (!def) continue;
+      // Use best mission contribution for deterrence
+      const maxBonus = Math.max(...Object.values(def.missionBonus || { default: 1 }));
+      totalAttack += def.attack * u.size * maxBonus;
+    }
+  }
+  return Math.min(AIRFORCE_STRENGTH_MAX, totalAttack / AIR_DETERRENCE_ATTACK_SCALE);
+}
+
+// Total deterrence in absolute strength units (sum of all branch strengths).
+function getTotalMilitaryStrength() {
+  return getArmyStrength() + getNavyStrength() + getAirForceStrength();
+}
+
+// Legacy alias used by history snapshot.
+function getMilitaryStrength() { return getTotalMilitaryStrength(); }
+
+// ── Goods flow / Supply system (Phase 5.2) ────────────────────────────────────────────────
+// Delivery efficiency: 50% base + 50% from infra level. Low infra = goods rot at source.
+function getGoodsProduced()       { return G.manufacturingLevel * GOODS_PER_MFG_LEVEL; }
+function getGoodsDeliveryEff()    { return 0.5 + 0.5 * (G.infraLevel / 100); }
+function getGoodsDelivered()      { return getGoodsProduced() * getGoodsDeliveryEff(); }
+function getCivilianGoodsDemand() { return G.population * GOODS_PER_MILLION_POP; }
+function getMilitaryGoodsDemand() { return getArmyStrength() * GOODS_PER_ARMY_STRENGTH; }
+function getTotalGoodsDemand()    { return getCivilianGoodsDemand() + getMilitaryGoodsDemand(); }
+// 0–1: fraction of demand covered. 1 = fully supplied; <1 = deficit.
+function getSupplyRatio() {
+  const demand = getTotalGoodsDemand();
+  if (demand <= 0) return 1;
+  return Math.min(1, getGoodsDelivered() / demand);
+}
+function getSupplyHappinessPenalty() {
+  return SUPPLY_HAPPINESS_PENALTY_MAX * Math.max(0, 1 - getSupplyRatio());
+}
+// 0–1 army combat effectiveness multiplier (used by Phase 5.6+ war system).
+function getArmySupplyEffectiveness() { return getSupplyRatio(); }
+
+// Province installations (Phase 5.3)
+function getInstallationCountInProvince(type, provinceId) {
+  return G.installations.filter(i => i.type === type && i.provinceId === provinceId).length;
+}
+function getInstallationsInProvince(provinceId) {
+  return G.installations.filter(i => i.provinceId === provinceId);
+}
+function getInstallationBuildCost(type, provinceId) {
+  const existing = getInstallationCountInProvince(type, provinceId);
+  return Math.round(INSTALLATION_TYPES[type].buildCost * (1 + existing * INSTALLATION_BUILD_COST_SCALE));
+}
+function getTotalInstallationMaintenance() {
+  return G.installations.reduce((sum, i) => sum + (INSTALLATION_TYPES[i.type]?.maintenance || 0), 0);
+}
+
+// Returns the max number of deposit slots for a province (stored directly on the province).
+function getRegionCapacity(provinceId) {
+  const prov = PROVINCES[provinceId];
+  if (!prov) return 0;
+  return prov.depositSlots || 2;
+}
+
+// Returns number of currently active deposits (all statuses) in a province.
+function getRegionActiveDepositCount(provinceId) {
+  return G.deposits.filter(d => d.regionId === provinceId).length;
+}
+
+// Returns player province IDs that still have at least one free deposit slot.
+function getFreeSlotProvinces() {
+  return Object.keys(PROVINCES)
+    .filter(id => PROVINCES[id].nationId === 'player')
+    .filter(id => getRegionActiveDepositCount(id) < getRegionCapacity(id));
+}
+
+// Regional congestion multiplier: +20% development cost per other deposit in the same region.
+function getRegionCongestionMultiplier(dep) {
+  if (!dep.regionId) return 1;
+  const others = G.deposits.filter(d => d.regionId === dep.regionId && d.id !== dep.id).length;
+  return 1 + 0.20 * others;
+}
+
+// Returns IDs of all resource types currently discoverable:
+// requiresTech === null = always available; otherwise needs that resource ID in G.unlockedResources.
+function getAvailableResourceTypes() {
+  return Object.keys(RESOURCE_TYPES).filter(id => {
+    const req = RESOURCE_TYPES[id].requiresTech;
+    return req === null || G.unlockedResources.includes(id);
+  });
+}
+
+// Per-turn discovery chance. Returns 0 if all province slots are full.
+// Otherwise scales with prospectingLevel; diminishes with total active deposits.
+function getProspectChance() {
+  if (getFreeSlotProvinces().length === 0) return 0;
+  const levelBonus = G.prospectingLevel * PROSPECT_LEVEL_SCALE;
+  const diminish   = 1 / (1 + G.deposits.length * PROSPECT_DIMINISH_RATE);
+  return (PROSPECT_BASE_CHANCE + levelBonus) * diminish;
+}
+
+// Total cost ($M) for the current development phase of a deposit, including regional congestion.
+function getDepositDevelopCost(dep) {
+  const congestion = getRegionCongestionMultiplier(dep);
+  let base = 0;
+  if (dep.status === 'anomaly' || dep.status === 'surveying') base = DEPOSIT_SURVEY_COST;
+  else if (dep.status === 'commissioning') base = DEPOSIT_COMMISSION_COST[dep.currentTier] || 0;
+  else if (dep.status === 'upgrading') base = DEPOSIT_TIER_UPGRADE_COST[dep.currentTier] || 0;
+  return Math.round(base * congestion);
+}
+
+// Whether the player has the tech to attempt an upgrade from a deposit's current tier.
+function canUpgradeDeposit(dep) {
+  if (dep.status !== 'producing') return false;
+  if (dep.currentTier === 'majorReserve') return false;
+  const techNeeded = {
+    occurrence: 'prospectingMethods',
+    vein:       'industrialMining',
+    deposit:    'openPitMining',
+    reserve:    'deepVeinExtraction',
+  };
+  const needed = techNeeded[dep.currentTier];
+  return needed ? G.unlockedTechs.includes(needed) : false;
+}
+
+// Mt/yr produced by a deposit (0 if not currently in 'producing' status).
+function getDepositOutput(dep) {
+  if (dep.status !== 'producing' || !dep.currentTier) return 0;
+  return DEPOSIT_TIER_OUTPUT[dep.currentTier] || 0;
+}
+
+// Sum of Mt/yr per resource type: active producing deposits + established industry pool.
+function getResourceProduction() {
+  const prod = {};
+  for (const dep of G.deposits) {
+    const units = getDepositOutput(dep);
+    if (units > 0 && dep.resourceType) {
+      prod[dep.resourceType] = (prod[dep.resourceType] || 0) + units;
+    }
+  }
+  for (const [resType, industry] of Object.entries(G.establishedIndustries || {})) {
+    if (industry.totalOutput > 0) {
+      prod[resType] = (prod[resType] || 0) + industry.totalOutput;
+    }
+  }
+  return prod;
 }
 
 // Population capacity: territory × base × infrastructure multiplier × project/tech multipliers.
