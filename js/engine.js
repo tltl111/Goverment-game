@@ -467,15 +467,16 @@ function getNavyCommanderRawAttack(commander) {
 function getNavyCommanderEffectiveStrength(commander) {
   const rawAttack = getNavyCommanderRawAttack(commander);
   if (rawAttack === 0) return 0;
-  if (commander.mission !== 'tradeProtection' || !commander.target) return rawAttack;
+  const fuelMult = getFuelRatio();
+  if (commander.mission !== 'tradeProtection' || !commander.target) return rawAttack * fuelMult;
   const zone = SEA_PROVINCES[commander.target];
-  if (!zone) return rawAttack;
+  if (!zone) return rawAttack * fuelMult;
   const hasAdjacentBase = G.installations.some(inst => {
     if (inst.type !== 'navalBase') return false;
     const prov = PROVINCES[inst.provinceId];
     return prov && prov.coastal && prov.nationId === 'player';
   });
-  return rawAttack * (hasAdjacentBase ? (1 + NAVAL_BASE_STAGING_BONUS) : 1);
+  return rawAttack * (hasAdjacentBase ? (1 + NAVAL_BASE_STAGING_BONUS) : 1) * fuelMult;
 }
 
 // Sum of effective navy + air superiority strength assigned to a zone.
@@ -602,7 +603,7 @@ function getAirCommanderEffectiveStrength(commander) {
     base += def.attack * u.size * bonus;
     if (def.reconBonus) reconBonusMult += def.reconBonus;
   }
-  return base * reconBonusMult;
+  return base * reconBonusMult * getFuelRatio();
 }
 
 // Air logistics supply bonus contributed to a player province by Transport-equipped commanders.
@@ -806,7 +807,9 @@ function getCommanderCombatPower(cmd, stat) {
 // How many turns a unit of this type takes to advance one province hop.
 // Equipment tier speedBonus is added to base speed (Phase 5.7e).
 function getUnitTurnsPerHop(unitType) {
-  return Math.ceil(UNIT_MOVEMENT_BASE_TURNS / Math.max(1, getEffectiveUnitSpeed(unitType)));
+  const fuelRatio = getFuelRatio();
+  const effectiveSpeed = getEffectiveUnitSpeed(unitType) * Math.max(0.1, fuelRatio);
+  return Math.ceil(UNIT_MOVEMENT_BASE_TURNS / Math.max(1, effectiveSpeed));
 }
 
 // ── Equipment refit helpers (Phase 5.7e) ──────────────────────────────────────────────────
@@ -849,6 +852,9 @@ function getCommanderDeploymentProvince(cmd) {
     return path[0] || getCapitalProvinceId();
   }
   if (order.type === 'defend' && order.target) {
+    return order.target;
+  }
+  if (order.type === 'garrison' && order.target) {
     return order.target;
   }
   return getCapitalProvinceId();
@@ -935,7 +941,7 @@ function getSiegeAttackStrength(provId) {
   }
   atk = unitAttacks.reduce((s, v) => s + v, 0);
   if (artilleryPresent) atk *= (1 + artilleryBonus);
-  return atk;
+  return atk * getFuelRatio();
 }
 
 // Defense strength contributed by all AI units of a nation currently in a province.
@@ -1185,23 +1191,83 @@ function getMilitaryStrength() { return getTotalMilitaryStrength(); }
 
 // ── Goods flow / Supply system (Phase 5.2) ────────────────────────────────────────────────
 // Delivery efficiency: 50% base + 50% from infra level. Low infra = goods rot at source.
-function getGoodsProduced()       { return G.manufacturingLevel * GOODS_PER_MFG_LEVEL; }
+function getGoodsProduced()       { return G.manufacturingLevel * GOODS_PER_MFG_LEVEL * (1 - Math.min(BOMBING_MFG_DEBUFF_MAX, G.bombingMfgDebuff || 0)); }
 function getGoodsDeliveryEff()    { return 0.5 + 0.5 * (G.infraLevel / 100); }
 function getGoodsDelivered()      { return getGoodsProduced() * getGoodsDeliveryEff(); }
 function getCivilianGoodsDemand() { return G.population * GOODS_PER_MILLION_POP; }
 function getMilitaryGoodsDemand() { return getArmyStrength() * GOODS_PER_ARMY_STRENGTH; }
 function getTotalGoodsDemand()    { return getCivilianGoodsDemand() + getMilitaryGoodsDemand(); }
+// Phase 5.9: maximum goods stockpile (grows with manufacturing level).
+function getGoodsStockpileMax() { return G.manufacturingLevel * GOODS_PER_MFG_LEVEL * STOCKPILE_CAP_TURNS; }
+// Phase 5.9: how many goods units/turn a nation will absorb (scales inversely with military strength).
+function getNationGoodsDemandUnits(nationId) {
+  const mil = (NATIONS[nationId]?.militaryLevel ?? GOODS_AI_DEMAND_MIL_CEILING);
+  return Math.max(0, GOODS_EXPORT_MAX_PER_ROUTE * (1 - mil / GOODS_AI_DEMAND_MIL_CEILING));
+}
 // 0–1: fraction of demand covered. 1 = fully supplied; <1 = deficit.
+// Stockpile draw (G.goodsStockpileDrawRatio) is added first; bombing drain subtracted last.
 function getSupplyRatio() {
   const demand = getTotalGoodsDemand();
   if (demand <= 0) return 1;
-  return Math.min(1, getGoodsDelivered() / demand);
+  const raw = Math.min(1, getGoodsDelivered() / demand);
+  const withStockpile = Math.min(1, raw + (G.goodsStockpileDrawRatio || 0));
+  return Math.max(0, withStockpile - Math.min(BOMBING_SUPPLY_DRAIN_MAX, G.bombingSupplyDrain || 0));
 }
 function getSupplyHappinessPenalty() {
   return SUPPLY_HAPPINESS_PENALTY_MAX * Math.max(0, 1 - getSupplyRatio());
 }
 // 0–1 army combat effectiveness multiplier (used by Phase 5.6+ war system).
 function getArmySupplyEffectiveness() { return getSupplyRatio(); }
+
+// ── Fuel system (Phase 5.10) ──────────────────────────────────────────────────────────────
+// Oil is refined via manufacturing: fuel produced = oilOutput × (mfgLevel / 100).
+// Navy and Air Force each consume fuel per deployed unit size per turn.
+// Shortfall (after stockpile draw) reduces BOTH branches' effectiveness proportionally.
+function getFuelProduced() {
+  const oilOutput = getPlayerResourceOutput().oil || 0;
+  const refineEff = G.manufacturingLevel > 0 ? Math.min(1, G.manufacturingLevel / 100) : 0;
+  return oilOutput * refineEff;
+}
+function getFuelNavyDemand() {
+  let size = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'navy') continue;
+    for (const u of (cmd.units || [])) { if (u.status === 'ready') size += u.size || 0; }
+  }
+  return size * FUEL_PER_NAVY_UNIT_SIZE;
+}
+function getFuelAirForceDemand() {
+  let size = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'airForce') continue;
+    for (const u of (cmd.units || [])) { if (u.status === 'ready') size += u.size || 0; }
+  }
+  return size * FUEL_PER_AIR_UNIT_SIZE;
+}
+function getFuelArmyDemand() {
+  let demand = 0;
+  for (const cmd of (G.commanders || [])) {
+    if (cmd.branch !== 'army') continue;
+    for (const u of (cmd.units || [])) {
+      if (u.status !== 'ready') continue;
+      demand += (UNIT_TYPES[u.type]?.fuelConsumption || 0) * (u.size || 0);
+    }
+  }
+  return demand;
+}
+function getTotalFuelDemand() { return getFuelNavyDemand() + getFuelAirForceDemand() + getFuelArmyDemand(); }
+function getFuelStockpileMax() {
+  const produced = getFuelProduced();
+  const storageBonusCount = (G.installations || []).filter(i => i.type === 'fuelStorage').length;
+  return produced * FUEL_STOCKPILE_CAP_TURNS + storageBonusCount * FUEL_STORAGE_CAPACITY_BONUS;
+}
+// 0–1: fraction of fuel demand met (production + stockpile draw).
+function getFuelRatio() {
+  const demand = getTotalFuelDemand();
+  if (demand <= 0) return 1;
+  const raw = Math.min(1, getFuelProduced() / demand);
+  return Math.min(1, raw + (G.fuelStockpileDrawRatio || 0));
+}
 
 // Province installations (Phase 5.3)
 function getInstallationCountInProvince(type, provinceId) {
@@ -1234,6 +1300,7 @@ function getRegionActiveDepositCount(provinceId) {
 function getFreeSlotProvinces() {
   return Object.keys(PROVINCES)
     .filter(id => PROVINCES[id].nationId === 'player')
+    .filter(id => !G.integratingProvinces?.[id])            // blocked during integration
     .filter(id => getRegionActiveDepositCount(id) < getRegionCapacity(id));
 }
 

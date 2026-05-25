@@ -74,9 +74,12 @@ const SUPPLY_HAPPINESS_PENALTY_MAX  = 10;   // max happiness penalty when supply
 // Airfield + Naval Base implemented now; Fortifications + Supply Depot deferred.
 // Build cost scales: each additional same type in the same province costs more.
 const INSTALLATION_TYPES = {
-  airfield:  { name: 'Airfield',   icon: '✈️', buildCost: 200, maintenance: 1.0, requiresCoastal: false },
-  navalBase: { name: 'Naval Base', icon: '⚓', buildCost: 300, maintenance: 1.5, requiresCoastal: true  },
+  airfield:    { name: 'Airfield',     icon: '✈️', buildCost: 200, maintenance: 1.0, requiresCoastal: false },
+  navalBase:   { name: 'Naval Base',   icon: '⚓', buildCost: 300, maintenance: 1.5, requiresCoastal: true  },
+  fuelStorage: { name: 'Fuel Storage', icon: '⛽', buildCost: 120, maintenance: 0.5, requiresCoastal: false, maxPerProvince: 2 },
 };
+// Flat bonus each Fuel Storage installation adds to the fuel stockpile cap.
+const FUEL_STORAGE_CAPACITY_BONUS = 10; // fuel units per installation
 const INSTALLATION_BUILD_COST_SCALE = 0.5;  // +50% build cost per existing same type in same province
 
 // Merchant fleet (Phase 5.4)
@@ -279,3 +282,52 @@ const PRODUCTION_SUPPLY_SLOW_THRESHOLD = 0.5;  // if supplyRatio < this, product
 const COMMANDER_ASSESSMENT_INTERVAL   = 3;     // turns between assessment regeneration per commander
 const COMMANDER_ASSESS_RECRUIT_THRESHOLD = 20; // recommend recruit if total ready attack < this
 const COMMANDER_ASSESS_BUDGET_THRESHOLD  = 5;  // recommend budget increase if shortfall > this M/turn
+
+// Occupation & Integration — Phase 5.8a
+// Resistance (0–100) builds each turn in occupied provinces; at 100 the province revolts back.
+// A commander with a garrison order suppresses resistance. Education level reduces growth.
+const OCCUPATION_RESISTANCE_BASE_GROWTH        = 3;    // resistance pts/turn per province development (no garrison)
+const OCCUPATION_DISTANCE_RESISTANCE_BONUS     = 0.5;  // extra resistance/turn per hop beyond 2 from capital
+const OCCUPATION_EDU_SUPPRESSION               = 0.03; // resistance growth reduced by this × educationLevel
+const OCCUPATION_GARRISON_SUPPRESSION_BASE     = 5;    // resistance pts/turn reduced when any garrison is present
+const OCCUPATION_GARRISON_SUPPRESSION_PER_SIZE = 0.4;  // extra suppression per total ready unit size in province
+const OCCUPATION_ADMIN_COST_PER_DEV            = 2;    // $M/turn treasury drain per province development level
+const OCCUPATION_REVOLT_THRESHOLD              = 100;  // resistance level at which province revolts back to original owner
+
+// Integration: annexed provinces take time to fully contribute to the economy.
+// During this period GDP contributions and deposit slots are withheld.
+const INTEGRATION_TURNS_PER_DEV        = 6;   // turns to integrate per province development level
+const INTEGRATION_EDU_REDUCTION_PER_20 = 2;   // turns subtracted per 20 education level points
+const TERRITORY_SCORE_PER_DEV          = 0.1; // added to G.territoryScore per development when fully integrated
+
+// Strategic bombing & naval interdiction — Phase 5.8b
+// Bombers accumulate 'bomb damage' per province per turn; at the threshold, dev drops by 1.
+// Provinces auto-repair when not being bombed. AI nations bomb player provinces symmetrically.
+const BOMBING_DAMAGE_PER_STR                      = 2;    // bomb dmg pts added per effective strength per turn (split across provinces)
+const BOMBING_DEV_DROP_THRESHOLD                  = 10;   // accumulated dmg pts needed to reduce dev by 1
+const BOMBING_REPAIR_DAMAGE_PER_TURN              = 1;    // partial dmg healed per turn when province NOT being bombed
+const BOMBING_DEV_REPAIR_TURNS                    = 4;    // consecutive unbombed turns required to recover 1 lost dev point
+const BOMBING_MFG_DEBUFF_PER_STR                  = 0.004; // manufacturing output fraction reduced per unit of AI bombing strength
+const BOMBING_MFG_DEBUFF_MAX                      = 0.40; // cap: AI bombing can reduce manufacturing by at most 40%
+const BOMBING_SUPPLY_DRAIN_PER_PROV               = 0.03; // supply ratio reduction per player province actively being bombed
+const BOMBING_SUPPLY_DRAIN_MAX                    = 0.30; // cap: supply drain from bombing capped at 30%
+const AI_BOMBING_STRENGTH_FRACTION                = 0.20; // fraction of enemy militaryLevel that becomes per-turn bombing strength
+const NAVAL_INTERDICTION_MIL_DRAIN                = 0.05; // enemy militaryLevel drained per dominated sea zone per turn (at full control)
+const NAVAL_INTERDICTION_MATURITY_FREEZE_THRESHOLD = 0.4; // sea control below this → freeze player coastal trade route maturity growth
+
+// Surplus goods stockpile & export — Phase 5.9
+// Surplus goods produced beyond demand accumulate in a stockpile. Player sets a reserve; anything
+// above the reserve can be exported to trade partners. Stockpile also buffers supply deficits.
+const STOCKPILE_CAP_TURNS         = 10;   // maximum stockpile = this many turns of total production
+const GOODS_EXPORT_BASE_PRICE     = 4.0;  // $M income per exported goods unit
+const GOODS_QUALITY_MFG_BONUS     = 0.5;  // income × (1 + mfgLevel/100 × 0.5); bonus at mfg 100 = +50%
+const GOODS_AI_DEMAND_MIL_CEILING = 80;   // nations with militaryLevel ≥ this have zero goods demand
+const GOODS_EXPORT_MAX_PER_ROUTE  = 8;    // max goods units/turn a single nation will absorb
+
+// Fuel system — Phase 5.10
+// Oil output × (manufacturingLevel / 100) = fuel units produced per turn.
+// Navy and Air Force each consume fuel proportional to deployed unit sizes.
+// Shortfall reduces both branch effectivenesses proportionally (0–1 multiplier).
+const FUEL_PER_NAVY_UNIT_SIZE     = 0.10;  // fuel units consumed per navy unit size per turn
+const FUEL_PER_AIR_UNIT_SIZE      = 0.15;  // fuel units consumed per air unit size per turn
+const FUEL_STOCKPILE_CAP_TURNS    = 8;     // max stockpile = this many turns of fuel production

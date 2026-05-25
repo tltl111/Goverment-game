@@ -2827,7 +2827,41 @@ section {
 .peace-province-list      { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; max-height: 200px; overflow-y: auto; }
 .peace-province-row       { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); cursor: pointer; }
 .peace-province-row input { cursor: pointer; }
+.peace-prov-name          { flex: 1; }
+.peace-prov-stats         { font-size: 11px; color: var(--text-3); }
+.peace-res-high           { color: var(--red); font-weight: 600; }
+.peace-res-mid            { color: var(--yellow); font-weight: 600; }
+.peace-res-low            { color: var(--green); }
 .peace-no-provinces       { font-size: 12px; color: var(--text-3); font-style: italic; }
+
+/* Occupation & integration province panel elements (Phase 5.8a) */
+.occupied-badge           { background: rgba(192,57,43,0.18); color: var(--red); border: 1px solid rgba(192,57,43,0.3); }
+.prov-integrating-banner  { background: rgba(52,152,219,0.1); border: 1px solid rgba(52,152,219,0.25); border-radius: 6px; padding: 8px 10px; font-size: 12px; color: var(--text-1); margin-bottom: 6px; }
+.prov-integrating-hint    { font-size: 11px; margin-top: 3px; }
+.prov-bomb-damage-banner  { background: rgba(192,57,43,0.12); border: 1px solid rgba(192,57,43,0.25); border-radius: 6px; padding: 8px 10px; font-size: 12px; color: var(--red); margin-bottom: 6px; }
+.prov-bomb-damage-hint    { font-size: 11px; margin-top: 3px; }
+.mil-bombing-penalty-row  { color: var(--red); }
+
+/* ── Goods stockpile (Phase 5.9) ─────────────────────────────────────────────────────────── */
+.mil-stockpile-section    { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
+.mil-bar-stockpile        { background: var(--yellow, #f1c40f); }
+.stockpile-reserve-row    { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.stockpile-reserve-label  { font-size: 12px; color: var(--text-2); min-width: 110px; flex-shrink: 0; }
+.stockpile-reserve-slider { flex: 1; accent-color: var(--yellow, #f1c40f); cursor: pointer; }
+.stockpile-reserve-hint   { font-size: 11px; padding-bottom: 2px; }
+
+/* ── Fuel system (Phase 5.10) ────────────────────────────────────────────────────────────── */
+.mil-fuel-section  { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
+.mil-bar-fuel      { background: var(--orange, #e67e22); }
+.mil-fuel-shortfall { color: var(--red, #e74c3c); font-size: 12px; padding: 2px 0; }
+.mil-fuel-note     { font-size: 11px; margin-top: 2px; }
+.mil-fuel-hint     { font-size: 11px; margin-top: 2px; }
+
+/* ── Goods export toggle on trade route cards (Phase 5.9) ────────────────────────────────── */
+.btn-tr-goods-export      { font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); background: none; cursor: pointer; color: var(--text-2); margin-top: 2px; }
+.btn-tr-goods-export.active { border-color: var(--green, #27ae60); color: var(--green, #27ae60); background: rgba(39,174,96,0.08); }
+.tr-route-goods-income    { font-size: 11px; color: var(--green, #27ae60); }
+.tr-route-goods-warning   { font-size: 11px; }
 .peace-modal-actions      { display: flex; gap: 8px; }
 .peace-modal-actions .btn-primary   { flex: 1; }
 .peace-modal-actions .btn-secondary { flex: 1; background: none; border: 1px solid var(--border); color: var(--text-2); border-radius: 4px; padding: 6px 12px; cursor: pointer; }

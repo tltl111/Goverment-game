@@ -1354,12 +1354,13 @@ const UNIT_TYPES = {
     name:          'Light Infantry',
     icon:          '🪖',
     description:   'Cheap foot soldiers. Excellent at holding defensive positions; slow to advance.',
-    costPerSize:   8,     // M gold one-time recruitment cost per size
-    upkeepPerSize: 1,     // M gold/turn maintenance per size
+    costPerSize:   8,
+    upkeepPerSize: 1,
     recruitTurns:  2,
     attack:        3,
     defense:       6,
     speed:         2,
+    fuelConsumption: 0.05,  // fuel units per size per turn (marching — minimal)
   },
   mechanizedInfantry: {
     name:          'Mechanized Infantry',
@@ -1371,6 +1372,7 @@ const UNIT_TYPES = {
     attack:        5,
     defense:       5,
     speed:         4,
+    fuelConsumption: 0.15,  // armored transports — moderate
   },
   armoredCorps: {
     name:          'Armored Corps',
@@ -1382,6 +1384,7 @@ const UNIT_TYPES = {
     attack:        9,
     defense:       3,
     speed:         6,
+    fuelConsumption: 0.30,  // tanks — highest consumer
   },
   artilleryBattery: {
     name:          'Artillery Battery',
@@ -1390,10 +1393,11 @@ const UNIT_TYPES = {
     costPerSize:   30,
     upkeepPerSize: 5,
     recruitTurns:  3,
-    attack:        0,   // cannot advance/capture alone
+    attack:        0,
     defense:       2,
     speed:         1,
-    supportAttackBonus: 0.30,  // 30% bonus to all friendly attack in same province
+    supportAttackBonus: 0.30,
+    fuelConsumption: 0.10,  // tow vehicles
   },
   reconUnit: {
     name:          'Recon Unit',
@@ -1405,6 +1409,7 @@ const UNIT_TYPES = {
     attack:        2,
     defense:       2,
     speed:         8,
+    fuelConsumption: 0.10,  // fast scout vehicles
   },
   antiAirBattery: {
     name:          'Anti-Air Battery',
@@ -1416,7 +1421,8 @@ const UNIT_TYPES = {
     attack:        0,
     defense:       3,
     speed:         2,
-    airDefenseStrength: 6,  // reduces enemy air effectiveness in occupied province
+    airDefenseStrength: 6,
+    fuelConsumption: 0.08,  // vehicle-mounted guns
   },
   antiTankBattalion: {
     name:          'Anti-Tank Battalion',
@@ -1428,7 +1434,8 @@ const UNIT_TYPES = {
     attack:        2,
     defense:       5,
     speed:         3,
-    armorPiercingBonus: 4,  // added to attack specifically against armoredCorps
+    armorPiercingBonus: 4,
+    fuelConsumption: 0.08,  // vehicle-mounted
   },
 };
 

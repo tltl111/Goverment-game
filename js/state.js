@@ -136,8 +136,34 @@ function initGame(empireName) {
     // Exists only while a siege is in progress; deleted on capture or peace.
     siegeState: {},
     // Player-occupied enemy provinces (taken in combat, not yet formally annexed).
-    // { [provId]: { originalOwner: nationId } }
+    // { [provId]: { originalOwner: nationId, resistance: number (0-100), turnsHeld: number } }
     occupiedProvinces: {},
+
+    // Provinces recently annexed via peace deal, currently undergoing integration.
+    // During integration, the province does not contribute deposit slots or resources.
+    // { [provId]: { turnsRemaining: number } }
+    integratingProvinces: {},
+
+    // Bomb damage accumulation per province — Phase 5.8b.
+    // Any province (player or enemy) can accumulate damage from strategic bombing.
+    // { [provId]: { damage: number, devLost: number, repairTurns: number } }
+    provinceBombDamage: {},
+    // Per-turn manufacturing debuff and supply drain from AI bombing (0–1 fractions).
+    // Recomputed fresh each endTurn; 0 when no active war.
+    bombingMfgDebuff:   0,
+    bombingSupplyDrain: 0,
+
+    // Goods stockpile — Phase 5.9
+    // Surplus goods accumulate here; drawn on deficit; excess above reserve exported.
+    goodsStockpile:          0,   // current accumulated units
+    goodsStockpileReserve:   0,   // player-set minimum before exporting (units)
+    goodsStockpileDrawRatio: 0,   // recomputed each endTurn; fraction of demand covered by stockpile
+
+    // Fuel system — Phase 5.10
+    // Oil × mfg efficiency → fuel; shared pool for Navy + Air Force.
+    fuelStockpile:        0,   // accumulated surplus fuel units
+    fuelStockpileDrawRatio: 0, // recomputed each endTurn; fraction of fuel demand covered by stockpile
+
     // AI military — mirrored commander+unit structure per nation.
     // { [nationId]: { commanders: [ same shape as player Army commanders ] } }
     aiMilitary: {},

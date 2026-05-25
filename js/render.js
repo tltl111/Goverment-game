@@ -421,6 +421,7 @@ function renderDashboard() {
       { label: 'Deterrence Rating', value: getDeterrenceRating().toFixed(0) + '/100', unit: ' (strength ' + Math.round(getTotalMilitaryStrength()) + ')', max: 100, rawPct: getDeterrenceRating(), type: getDeterrenceRating() === 0 ? 'warn' : 'pos' },
       { label: 'Navy Strength',     value: getNavyStrength().toFixed(1) + '/' + NAVY_STRENGTH_MAX, unit: '', max: NAVY_STRENGTH_MAX, rawPct: getNavyStrength() / NAVY_STRENGTH_MAX * 100, type: getNavyStrength() === 0 ? 'warn' : 'pos' },
       { label: 'Air Force Strength',value: getAirForceStrength().toFixed(1) + '/' + AIRFORCE_STRENGTH_MAX, unit: '', max: AIRFORCE_STRENGTH_MAX, rawPct: getAirForceStrength() / AIRFORCE_STRENGTH_MAX * 100, type: getAirForceStrength() === 0 ? 'warn' : 'pos' },
+      { label: 'Territory Score',   value: (G.territoryScore || 1).toFixed(1), unit: (() => { const n = Object.keys(G.integratingProvinces || {}).length; return n > 0 ? ` (${n} integrating)` : ''; })(), max: 20, rawPct: Math.min(100, ((G.territoryScore || 1) / 20) * 100), type: 'pos' },
     ];
 
     const barClass = t => t === 'neg' ? 'bar-red' : t === 'warn' ? 'bar-yellow' : 'bar-green';
@@ -495,6 +496,18 @@ function renderDashboard() {
           ? `+${fmt(routeExport)} export +${fmt(routeImport)} savings`
           : `+${fmt(routeExport)} export`;
 
+        const nationGoodsDemand = getNationGoodsDemandUnits(route.nationId);
+        const goodsExportClass  = route.goodsExportEnabled ? 'active' : '';
+        const goodsExportLabel  = route.goodsExportEnabled ? '🏭 Goods ON' : '🏭 Goods OFF';
+        const goodsExportIncome = route.goodsExportIncomeLast || 0;
+        const goodsExportHint   = nationGoodsDemand <= 0
+          ? `<span class="tr-route-goods-warning stat-dim">Nation has no demand for manufactured goods</span>`
+          : route.goodsExportEnabled && goodsExportIncome > 0
+            ? `<span class="tr-route-goods-income">+${fmt(goodsExportIncome)}/turn manufactured goods</span>`
+            : route.goodsExportEnabled
+              ? `<span class="tr-route-goods-income stat-dim">+0 (no stockpile surplus above reserve)</span>`
+              : '';
+
         routeListHtml += `
           <div class="tr-route-card">
             <div class="tr-route-info">
@@ -506,6 +519,8 @@ function renderDashboard() {
             <div class="tr-route-right">
               <span class="tr-route-income">+${fmt(routeIncome)}/turn</span>
               <span class="tr-route-breakdown">${incomeBreakdown}</span>
+              <button class="btn-tr-goods-export ${goodsExportClass}" onclick="toggleRouteGoodsExport(${route.id})" title="Toggle manufactured goods export for this route">${goodsExportLabel}</button>
+              ${goodsExportHint}
               ${!isNegotiating ? `<button class="btn-tr-renegotiate" onclick="openNegotiationFromRoute('${route.nationId}')">Renegotiate</button>` : ''}
               <button class="btn-tr-close-route" onclick="closeTradeRoute(${route.id})">✕</button>
             </div>
@@ -1202,6 +1217,10 @@ function renderMilitary() {
           <span class="mil-stat-label">Produced</span>
           <span class="mil-stat-value">${goodsProduced.toFixed(1)} units/turn (Mfg ${Math.round(G.manufacturingLevel)})</span>
         </div>
+        ${(G.bombingMfgDebuff || 0) > 0 ? `<div class="mil-stat-row mil-bombing-penalty-row">
+          <span class="mil-stat-label">⚠️ Bombing debuff</span>
+          <span class="mil-stat-value stat-neg">−${Math.round((G.bombingMfgDebuff || 0) * 100)}% manufacturing output (enemy air raids)</span>
+        </div>` : ''}
         <div class="mil-stat-row">
           <span class="mil-stat-label">Delivery</span>
           <span class="mil-stat-value">${Math.round(deliveryEff * 100)}% efficiency → ${goodsDelivered.toFixed(1)} delivered (Infra ${Math.round(G.infraLevel)})</span>
@@ -1214,15 +1233,125 @@ function renderMilitary() {
           <span class="mil-stat-label">Military demand</span>
           <span class="mil-stat-value">${milDemand.toFixed(1)} units/turn (Army strength ${armyStr.toFixed(1)})</span>
         </div>
+        ${(G.bombingSupplyDrain || 0) > 0 ? `<div class="mil-stat-row mil-bombing-penalty-row">
+          <span class="mil-stat-label">⚠️ Supply disruption</span>
+          <span class="mil-stat-value stat-neg">−${Math.round((G.bombingSupplyDrain || 0) * 100)}% supply ratio (enemy bombardment)</span>
+        </div>` : ''}
         <div class="mil-bar-bg"><div class="mil-bar-fill mil-bar-supply" style="width:${Math.min(100, supplyPct)}%"></div></div>
         <div class="mil-supply-note ${supplyClass}">${supplyNote}</div>
+        ${(() => {
+          const stockMax = getGoodsStockpileMax();
+          if (stockMax <= 0) return '';
+          const stock    = G.goodsStockpile || 0;
+          const reserve  = G.goodsStockpileReserve || 0;
+          const stockPct = Math.min(100, (stock / stockMax) * 100);
+          const drawPct  = Math.round((G.goodsStockpileDrawRatio || 0) * 100);
+          const available = Math.max(0, stock - reserve);
+          const enabledCount = G.tradeRoutes.filter(r => r.goodsExportEnabled).length;
+          return `
+        <div class="mil-stockpile-section">
+          <div class="mil-stat-row">
+            <span class="mil-stat-label">📦 Goods stockpile</span>
+            <span class="mil-stat-value">${stock.toFixed(1)} / ${stockMax.toFixed(1)} units
+              ${drawPct > 0 ? `<span class="stat-pos"> · +${drawPct}% supply from stockpile</span>` : ''}
+            </span>
+          </div>
+          <div class="mil-bar-bg"><div class="mil-bar-fill mil-bar-stockpile" style="width:${stockPct}%"></div></div>
+          <div class="stockpile-reserve-row">
+            <label class="stockpile-reserve-label">Reserve: <strong>${reserve.toFixed(1)} units</strong></label>
+            <input type="range" class="stockpile-reserve-slider" min="0" max="${stockMax.toFixed(1)}" step="0.5"
+              value="${reserve}" oninput="setGoodsStockpileReserve(this.value)" />
+          </div>
+          <div class="stockpile-reserve-hint stat-dim">${available > 0
+            ? `${available.toFixed(1)} units above reserve — available for export to ${enabledCount} active route${enabledCount !== 1 ? 's' : ''}.`
+            : reserve >= stock
+              ? 'All stockpile is reserved — nothing available for export.'
+              : 'No surplus above reserve yet.'
+          }</div>
+        </div>`;
+        })()}
       </div>
+      ${(() => {
+        const navyUnlockedForFuel  = G.unlockedTechs.includes('navalFleet');
+        const airUnlockedForFuel   = G.unlockedTechs.includes('airForceEstablishment');
+        const armyUnlockedForFuel  = G.unlockedTechs.includes('standingArmy');
+        if (!navyUnlockedForFuel && !airUnlockedForFuel && !armyUnlockedForFuel) return '';
+        const fuelProduced  = getFuelProduced();
+        const fuelDemand    = getTotalFuelDemand();
+        const fuelRatio     = getFuelRatio();
+        const fuelPct       = Math.round(fuelRatio * 100);
+        const fuelClass     = fuelRatio >= 0.9 ? 'stat-pos' : fuelRatio >= 0.6 ? 'effect-neutral' : 'stat-neg';
+        const navyDemand    = getFuelNavyDemand();
+        const airDemand     = getFuelAirForceDemand();
+        const armyDemand    = getFuelArmyDemand();
+        const oilOutput     = getPlayerResourceOutput().oil || 0;
+        const refineEff     = G.manufacturingLevel > 0 ? Math.min(100, G.manufacturingLevel) : 0;
+        const storageBonusCount = (G.installations || []).filter(i => i.type === 'fuelStorage').length;
+        const stockpileMax  = getFuelStockpileMax();
+        const stockpile     = G.fuelStockpile || 0;
+        const drawPct       = Math.round((G.fuelStockpileDrawRatio || 0) * 100);
+        return `
+        <div class="mil-fuel-section">
+          <div class="mil-panel-header">
+            <span class="mil-panel-title">⛽ Fuel</span>
+            <span class="mil-deterrence-badge ${fuelClass}">${fuelPct}% fuelled</span>
+          </div>
+          <div class="mil-stat-row">
+            <span class="mil-stat-label">Production</span>
+            <span class="mil-stat-value">${oilOutput > 0
+              ? `${fuelProduced.toFixed(2)} units/turn (${oilOutput.toFixed(1)} oil × ${refineEff}% mfg refining)`
+              : `0 — no oil deposits active`}
+            </span>
+          </div>
+          ${armyUnlockedForFuel ? `<div class="mil-stat-row">
+            <span class="mil-stat-label">Army demand</span>
+            <span class="mil-stat-value">${armyDemand.toFixed(2)} units/turn</span>
+          </div>` : ''}
+          ${navyUnlockedForFuel ? `<div class="mil-stat-row">
+            <span class="mil-stat-label">Navy demand</span>
+            <span class="mil-stat-value">${navyDemand.toFixed(2)} units/turn</span>
+          </div>` : ''}
+          ${airUnlockedForFuel ? `<div class="mil-stat-row">
+            <span class="mil-stat-label">Air Force demand</span>
+            <span class="mil-stat-value">${airDemand.toFixed(2)} units/turn</span>
+          </div>` : ''}
+          <div class="mil-stat-row">
+            <span class="mil-stat-label">Stockpile cap</span>
+            <span class="mil-stat-value">${stockpileMax.toFixed(1)} units${storageBonusCount > 0 ? ` (+${storageBonusCount * FUEL_STORAGE_CAPACITY_BONUS} from ${storageBonusCount} storage${storageBonusCount !== 1 ? 's' : ''})` : ''}</span>
+          </div>
+          <div class="mil-bar-bg"><div class="mil-bar-fill mil-bar-fuel" style="width:${fuelPct}%"></div></div>
+          ${fuelRatio < 1 ? `<div class="mil-fuel-note stat-neg">⚠️ Fuel shortage — ${fuelPct}% effectiveness · Stockpile: ${stockpile.toFixed(1)} / ${stockpileMax.toFixed(1)} units${drawPct > 0 ? ` · +${drawPct}% from stockpile` : ''}</div>` : `<div class="mil-fuel-note stat-pos">✓ Fully fuelled${stockpile > 0 ? ` · Stockpile: ${stockpile.toFixed(1)} / ${stockpileMax.toFixed(1)} units` : ''}</div>`}
+          ${oilOutput === 0 && fuelDemand > 0 ? `<div class="mil-fuel-hint stat-dim">Establish oil deposits (requires Chemical Industry tech) to fuel your forces. Build ⛽ Fuel Storage to buffer supply.</div>` : ''}
+        </div>`;
+      })()}
       ${_buildInstallationsSection()}
       ${_buildCommandersSection()}
       <div class="mil-branches">
         ${armyCard}
-        ${navyCard}
-        ${airCard}
+        ${(() => {
+          if (!armyUnlocked) return armyCard;
+          const fuelRatio = getFuelRatio();
+          const hasFuelDemand = getFuelArmyDemand() > 0;
+          if (!hasFuelDemand || fuelRatio >= 1) return armyCard;
+          const pct = Math.round(fuelRatio * 100);
+          return armyCard.replace('</div>', `<div class="mil-fuel-shortfall">⛽ ${pct}% fuel — attack & march speed reduced</div></div>`);
+        })()}
+        ${(() => {
+          if (!navyUnlocked) return navyCard;
+          const fuelRatio = getFuelRatio();
+          const hasFuelDemand = getFuelNavyDemand() > 0;
+          if (!hasFuelDemand || fuelRatio >= 1) return navyCard;
+          const pct = Math.round(fuelRatio * 100);
+          return navyCard.replace('</div>', `<div class="mil-fuel-shortfall">⛽ ${pct}% fuel — fleet effectiveness reduced</div></div>`);
+        })()}
+        ${(() => {
+          if (!airForceUnlocked) return airCard;
+          const fuelRatio = getFuelRatio();
+          const hasFuelDemand = getFuelAirForceDemand() > 0;
+          if (!hasFuelDemand || fuelRatio >= 1) return airCard;
+          const pct = Math.round(fuelRatio * 100);
+          return airCard.replace('</div>', `<div class="mil-fuel-shortfall">⛽ ${pct}% fuel — air effectiveness reduced</div></div>`);
+        })()}
       </div>
     </div>`;
 }
@@ -1524,6 +1653,13 @@ function _buildCommandersSection() {
             .map(id => `<option value="${id}" ${order.target === id ? 'selected' : ''}>${PROVINCES[id].name}</option>`)
             .join('');
           orderTargetHtml = `<select class="mil-commander-select" onchange="setCommanderOrder('${cmd.id}', 'defend', this.value)">${provOpts}</select>`;
+        } else if (order.type === 'garrison') {
+          const occupiedOpts = Object.keys(G.occupiedProvinces || {})
+            .map(id => `<option value="${id}" ${order.target === id ? 'selected' : ''}>${PROVINCES[id]?.name || id}</option>`)
+            .join('');
+          orderTargetHtml = occupiedOpts
+            ? `<select class="mil-commander-select" onchange="setCommanderOrder('${cmd.id}', 'garrison', this.value)">${occupiedOpts}</select>`
+            : '<span class="stat-dim">No occupied provinces</span>';
         }
         const deployLabel = deployProv ? (PROVINCES[deployProv]?.name || deployProv) : '—';
         const statusBadge = (inPosition + moving) > 0
@@ -1582,6 +1718,7 @@ function _buildCommandersSection() {
                   <option value="hold" ${order.type === 'hold' ? 'selected' : ''}>Hold at Capital</option>
                   <option value="stage" ${order.type === 'stage' ? 'selected' : ''}>Stage Against…</option>
                   <option value="defend" ${order.type === 'defend' ? 'selected' : ''}>Defend Province…</option>
+                  <option value="garrison" ${order.type === 'garrison' ? 'selected' : ''}>Garrison Occupied Province…</option>
                 </select>
               </label>
               <span id="otgt_${cmd.id}">${orderTargetHtml}</span>
@@ -1621,7 +1758,13 @@ function _buildCommandersSection() {
         let effectBadge = '';
         if (cmd.branch === 'navy' && cmd.mission === 'tradeProtection' && cmd.target) {
           const ctrl = getSeaControlForZone(cmd.target);
-          effectBadge = `<span class="mil-deterrence-badge ${ctrl >= 0.5 ? 'stat-pos' : 'stat-neg'}">→ ${Math.round(ctrl * 100)}% control in ${SEA_PROVINCES[cmd.target]?.name || cmd.target}</span>`;
+          const isAtWar = (G.wars || []).length > 0;
+          const isInterdicting = isAtWar && ctrl > 0.5;
+          const isFrozen       = ctrl < NAVAL_INTERDICTION_MATURITY_FREEZE_THRESHOLD;
+          let badge = `${Math.round(ctrl * 100)}% control in ${SEA_PROVINCES[cmd.target]?.name || cmd.target}`;
+          if (isInterdicting) badge += ' · ⚓ Interdicting enemy supply';
+          if (isFrozen)       badge += ' · ❄ Route maturity frozen';
+          effectBadge = `<span class="mil-deterrence-badge ${ctrl >= 0.5 ? 'stat-pos' : 'stat-neg'}">→ ${badge}</span>`;
         } else if (cmd.branch === 'airForce' && cmd.mission === 'airSuperiority' && cmd.target) {
           const inRange = isAirMissionInRange('airSuperiority', cmd.target);
           effectBadge = inRange
@@ -1629,9 +1772,14 @@ function _buildCommandersSection() {
             : `<span class="mil-deterrence-badge stat-neg">⚠ Out of range — build Airfield closer</span>`;
         } else if (cmd.branch === 'airForce' && cmd.mission === 'strategicBombing' && cmd.target) {
           const inRange = isAirMissionInRange('strategicBombing', cmd.target);
-          effectBadge = inRange
-            ? `<span class="mil-deterrence-badge stat-pos">✈️ Bombing ${NATIONS[cmd.target]?.name} — −${(getAirCommanderEffectiveStrength(cmd) * STRATEGIC_BOMBING_DRAIN).toFixed(3)} mil/turn</span>`
-            : `<span class="mil-deterrence-badge stat-neg">⚠ Out of range — build Airfield closer</span>`;
+          if (inRange) {
+            const effStr = getAirCommanderEffectiveStrength(cmd);
+            const milDrain = (effStr * STRATEGIC_BOMBING_DRAIN).toFixed(3);
+            const bombDmg  = (effStr * BOMBING_DAMAGE_PER_STR).toFixed(1);
+            effectBadge = `<span class="mil-deterrence-badge stat-pos">✈️ Bombing ${NATIONS[cmd.target]?.name} — −${milDrain} mil/turn | +${bombDmg} bomb dmg/turn</span>`;
+          } else {
+            effectBadge = `<span class="mil-deterrence-badge stat-neg">⚠ Out of range — build Airfield closer</span>`;
+          }
         } else if (cmd.branch === 'airForce' && cmd.mission === 'airLogistics' && cmd.target) {
           const inRange = isAirMissionInRange('airLogistics', cmd.target);
           const bonus   = getAirLogisticsSupplyBonus(cmd.target);
@@ -2009,9 +2157,10 @@ function renderWorldMap() {
     svg += `<text class="map-siege-progress" x="${prov.labelX}" y="${prov.labelY + 14}">${Math.round(siege.progress)}%</text>`;
   }
 
-  // --- Info panel for selected nation OR selected player province ---
+  // --- Info panel for selected nation OR selected player province OR occupied province ---
   let infoHtml = '';
-  if (_mapSelectedProvince && PROVINCES[_mapSelectedProvince]?.nationId === 'player') {
+  const isOccupied = !!G.occupiedProvinces?.[_mapSelectedProvince];
+  if (_mapSelectedProvince && (PROVINCES[_mapSelectedProvince]?.nationId === 'player' || isOccupied)) {
     infoHtml = _buildProvincePanel(_mapSelectedProvince);
   } else if (_mapSelectedNation && G.nations[_mapSelectedNation]) {
     const id   = _mapSelectedNation;
@@ -2390,9 +2539,20 @@ function openPeaceDeal(nationId) {
     rowsHtml = '<div class="peace-no-provinces">No provinces currently occupied.</div>';
   } else {
     for (const provId of occupied) {
-      const name = PROVINCES[provId]?.name || provId;
+      const name       = PROVINCES[provId]?.name || provId;
+      const resistance = G.occupiedProvinces[provId]?.resistance ?? 0;
+      const resClass   = resistance >= 70 ? 'peace-res-high' : resistance >= 40 ? 'peace-res-mid' : 'peace-res-low';
+      const dev        = PROVINCES[provId]?.development ?? 1;
+      const turnsEdu   = Math.floor(G.educationLevel / 20) * INTEGRATION_EDU_REDUCTION_PER_20;
+      const intTurns   = Math.max(3, dev * INTEGRATION_TURNS_PER_DEV - turnsEdu);
       rowsHtml += `<label class="peace-province-row">
-        <input type="checkbox" class="peace-prov-check" value="${provId}" checked> ${name}
+        <input type="checkbox" class="peace-prov-check" value="${provId}" checked>
+        <span class="peace-prov-name">${name}</span>
+        <span class="peace-prov-stats">
+          Dev ${dev} &nbsp;·&nbsp;
+          <span class="${resClass}">Resistance ${resistance.toFixed(0)}%</span>
+          &nbsp;·&nbsp; ~${intTurns}t integration
+        </span>
       </label>`;
     }
   }
@@ -2421,6 +2581,39 @@ function _buildProvincePanel(provinceId) {
   const prov = PROVINCES[provinceId];
   if (!prov) return '';
 
+  const isOccupied   = !!G.occupiedProvinces?.[provinceId];
+  const isIntegrating = !isOccupied && !!G.integratingProvinces?.[provinceId];
+  const occData       = G.occupiedProvinces?.[provinceId];
+  const intData       = G.integratingProvinces?.[provinceId];
+  const bombData      = G.provinceBombDamage?.[provinceId];
+
+  // Occupied province — show resistance info instead of build UI
+  if (isOccupied) {
+    const resistance = occData?.resistance ?? 0;
+    const resClass   = resistance >= 70 ? 'stat-neg' : resistance >= 40 ? 'stat-warn' : 'stat-pos';
+    const turnsHeld  = occData?.turnsHeld ?? 0;
+    const hasGarrison = (G.commanders || []).some(
+      c => c.branch === 'army' && c.order?.type === 'garrison' && c.order?.target === provinceId
+    );
+    return `
+      <div class="map-info-panel">
+        <div class="map-info-nation">
+          <span class="map-info-name">${prov.name}</span>
+          <span class="map-province-badge occupied-badge">⚔️ Occupied</span>
+        </div>
+        <div class="map-info-grid">
+          <div class="map-info-item"><div class="map-info-label">Dev</div><div class="map-info-val">${prov.development}/5</div></div>
+          <div class="map-info-item"><div class="map-info-label">Turns Held</div><div class="map-info-val">${turnsHeld}</div></div>
+          <div class="map-info-item"><div class="map-info-label">Resistance</div><div class="map-info-val ${resClass}">${resistance.toFixed(0)}/100</div></div>
+          <div class="map-info-item"><div class="map-info-label">Garrison</div><div class="map-info-val ${hasGarrison ? 'stat-pos' : 'stat-neg'}">${hasGarrison ? '✓ Yes' : '✗ None'}</div></div>
+        </div>
+        <div class="prov-install-section">
+          <div class="prov-install-label stat-dim">${hasGarrison ? 'Garrison is suppressing resistance.' : '⚠ No garrison — resistance is growing. Assign a commander with Garrison order.'}</div>
+          ${(bombData && (bombData.damage > 0 || bombData.devLost > 0)) ? `<div class="prov-bomb-damage-banner">💥 Under Bombardment — ${bombData.damage.toFixed(1)} / ${BOMBING_DEV_DROP_THRESHOLD} dmg${bombData.devLost > 0 ? ` · ${bombData.devLost} dev lost` : ''}</div>` : ''}
+        </div>
+      </div>`;
+  }
+
   const existing = getInstallationsInProvince(provinceId);
   let existingHtml = '';
   if (existing.length > 0) {
@@ -2440,13 +2633,32 @@ function _buildProvincePanel(provinceId) {
     const cost = getInstallationBuildCost(type, provinceId);
     const canAfford = G.treasury >= cost;
     const needsCoastal = def.requiresCoastal && !prov.coastal;
-    const disabled = !canAfford || needsCoastal;
+    const atMax = def.maxPerProvince !== undefined &&
+      (G.installations || []).filter(i => i.type === type && i.provinceId === provinceId).length >= def.maxPerProvince;
+    const disabled = !canAfford || needsCoastal || atMax;
     const disabledAttr = disabled ? 'disabled' : '';
-    const hint = needsCoastal ? ' (coastal only)' : (!canAfford ? ' (need ' + fmt(cost) + 'M)' : '');
+    const hint = atMax ? ` (max ${def.maxPerProvince} per province)` : needsCoastal ? ' (coastal only)' : (!canAfford ? ' (need ' + fmt(cost) + 'M)' : '');
     buildHtml += `<button class="btn btn-sm prov-install-btn" onclick="buildInstallation('${type}','${provinceId}')" ${disabledAttr}>
       ${def.icon} ${def.name} — ${fmt(cost)}M${hint}
     </button>`;
   }
+
+  // Integration progress banner (shown for newly annexed provinces)
+  const integrationHtml = isIntegrating
+    ? `<div class="prov-integrating-banner">
+        ⏳ Integrating — ${intData.turnsRemaining} turn${intData.turnsRemaining !== 1 ? 's' : ''} remaining
+        <div class="prov-integrating-hint stat-dim">Deposit slots and resources locked until integration completes.</div>
+      </div>`
+    : '';
+
+  // Bomb damage banner (shown when province has active bomb damage)
+  const bombHtml = (bombData && (bombData.damage > 0 || bombData.devLost > 0))
+    ? `<div class="prov-bomb-damage-banner">
+        💥 Under Bombardment — ${bombData.damage.toFixed(1)} / ${BOMBING_DEV_DROP_THRESHOLD} dmg
+        ${bombData.devLost > 0 ? `<span class="stat-neg"> · ${bombData.devLost} dev lost</span>` : ''}
+        <div class="prov-bomb-damage-hint stat-dim">Development will auto-repair after ${BOMBING_DEV_REPAIR_TURNS} unbombed turns.</div>
+      </div>`
+    : '';
 
   return `
     <div class="map-info-panel">
@@ -2454,6 +2666,8 @@ function _buildProvincePanel(provinceId) {
         <span class="map-info-name">${prov.name}</span>
         <span class="map-province-badge">Dev ${prov.development}/5</span>
       </div>
+      ${integrationHtml}
+      ${bombHtml}
       <div class="map-info-grid">
         <div class="map-info-item"><div class="map-info-label">Infra</div><div class="map-info-val">${prov.infraLevel}/3</div></div>
         <div class="map-info-item"><div class="map-info-label">Coastal</div><div class="map-info-val">${prov.coastal ? '✓ Yes' : '✗ No'}</div></div>

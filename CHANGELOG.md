@@ -4,6 +4,119 @@ All notable changes to Government Simulator will be documented here.
 
 ---
 
+## [Unreleased] — Fuel Storage & Army Fuel Consumption
+
+### Added
+- **Fuel Storage installation** (`constants.js`, `actions.js`, `render.js`): New `⛽ Fuel Storage` installation (cost $120M, maintenance $0.5M/turn) buildable in any owned province, max 2 per province. Each adds a flat `+10` fuel units to the stockpile cap (`FUEL_STORAGE_CAPACITY_BONUS`). Cap enforcement in both `buildInstallation()` action and province build panel.
+- **Army fuel consumption** (`data.js`, `engine.js`): Each army unit type now has a `fuelConsumption` rate (fuel units per size per turn): Light Infantry 0.05, Artillery/Recon 0.10, Mech. Infantry 0.15, Anti-Air/Anti-Tank 0.08, Armored Corps 0.30. `getFuelArmyDemand()` sums all ready army units; added to `getTotalFuelDemand()`.
+- **Army fuel debuffs** (`engine.js`): Fuel shortfall applies two penalties to the army — (1) `getSiegeAttackStrength()` is multiplied by `getFuelRatio()`, reducing offensive power and slowing province capture; (2) `getUnitTurnsPerHop()` factors in `getFuelRatio()` as a speed multiplier, increasing march time per hop when fuel is low.
+- **Fuel panel updates** (`render.js`): Army demand row shown in the ⛽ Fuel section when Standing Army is unlocked. Stockpile cap row now shows the bonus from Fuel Storage installations. Army branch card gains a fuel shortfall warning when `getFuelRatio() < 1`.
+- **Province build panel** (`render.js`): Fuel Storage button shows "max 2 per province" and is disabled when cap is reached.
+
+### Constants added (`constants.js`)
+- `FUEL_STORAGE_CAPACITY_BONUS` (10) — flat fuel unit stockpile bonus per Fuel Storage installation
+- `fuelStorage` entry in `INSTALLATION_TYPES` — buildCost 120, maintenance 0.5, maxPerProvince 2
+
+### Unit type changes (`data.js`)
+- `fuelConsumption` field added to all 7 army unit types (0.05–0.30)
+
+---
+
+## [Unreleased] — Phase 5.10: Fuel Layer — Navy + Air Force Oil Consumption
+
+### Added
+- **Fuel production** (`engine.js` — `getFuelProduced`): Oil output × `(manufacturingLevel / 100)` determines fuel units produced per turn. Both oil deposits AND manufacturing tech investment are required to fuel the military.
+- **Fuel demand** (`engine.js` — `getFuelNavyDemand`, `getFuelAirForceDemand`, `getTotalFuelDemand`): Each ready Navy unit consumes `FUEL_PER_NAVY_UNIT_SIZE` (0.10) fuel/turn per size point; each ready Air Force unit consumes `FUEL_PER_AIR_UNIT_SIZE` (0.15) fuel/turn per size point.
+- **Fuel stockpile** (`state.js`, `engine.js` — `getFuelStockpileMax`): Surplus fuel accumulates up to `FUEL_STOCKPILE_CAP_TURNS` (8) × production. On deficit, the stockpile is drawn down first before applying the fuel ratio.
+- **Fuel stockpile tick** (`actions.js` — `endTurn` section 2.4k): Each turn, stockpile draw fills any production deficit (ratio stored in `G.fuelStockpileDrawRatio`), then surplus is added to the stockpile. Unmet shortfall triggers a warning log.
+- **Fuel ratio** (`engine.js` — `getFuelRatio`): Returns 0–1 fraction of total fuel demand met this turn (production + stockpile draw).
+- **Navy/Air Force effectiveness penalty** (`engine.js`): `getNavyCommanderEffectiveStrength` and `getAirCommanderEffectiveStrength` both multiply their result by `getFuelRatio()`. Fuel shortfall therefore directly degrades both fleet and air combat output.
+- **Fuel section in Military tab** (`render.js`): When Navy or Air Force is unlocked, a ⛽ Fuel section appears in the Military panel showing oil output, refining efficiency, production/turn, demand breakdown, a fuel ratio bar, and a shortfall warning (when `getFuelRatio() < 1`).
+- **Branch card fuel shortfall note** (`render.js`): Navy and Air Force branch cards gain an inline shortfall warning when fuel ratio drops below 100%.
+- **Fuel CSS** (`style.css`): `.mil-fuel-section`, `.mil-bar-fuel`, `.mil-fuel-shortfall`, `.mil-fuel-note`, `.mil-fuel-hint` added.
+
+### State fields added (`state.js`)
+- `G.fuelStockpile` — accumulated surplus fuel units
+- `G.fuelStockpileDrawRatio` — fraction of fuel demand covered by stockpile this turn
+
+### Constants added (`constants.js`)
+- `FUEL_PER_NAVY_UNIT_SIZE` (0.10), `FUEL_PER_AIR_UNIT_SIZE` (0.15), `FUEL_STOCKPILE_CAP_TURNS` (8)
+
+---
+
+## [Unreleased] — Phase 5.9: Surplus Manufactured Goods Export
+
+### Added
+- **Goods stockpile** (`state.js`, `engine.js`): Surplus goods (produced beyond total demand) now accumulate in `G.goodsStockpile` each turn, up to `STOCKPILE_CAP_TURNS × production/turn`. When supply falls into deficit, the stockpile is drawn down first, buffering the supply ratio. `getGoodsStockpileMax()` and `getNationGoodsDemandUnits()` added to engine.
+- **Stockpile draw improves supply ratio** (`engine.js`): `getSupplyRatio()` now adds `G.goodsStockpileDrawRatio` to the raw ratio so stockpile coverage shows up in all supply-dependent calculations (army effectiveness, happiness, etc.).
+- **Per-route goods export toggle** (`actions.js`, `render.js`): Each trade route gains a `🏭 Goods ON/OFF` toggle button. When enabled, the route absorbs a share of stockpile goods above the player's reserve each turn.
+- **AI goods demand** (`engine.js` — `getNationGoodsDemandUnits`): Each nation's demand scales inversely with its `militaryLevel`. Nations with `militaryLevel ≥ GOODS_AI_DEMAND_MIL_CEILING` (80) buy nothing; weaker nations absorb up to `GOODS_EXPORT_MAX_PER_ROUTE` (8) units/turn.
+- **Goods export income** (`actions.js` — `endTurn` section 2.4j): Income per route = `allocated × GOODS_EXPORT_BASE_PRICE × maturity × quality × sea control`. Quality multiplier = `1 + (mfgLevel / 100) × GOODS_QUALITY_MFG_BONUS`. Sea disruption applies. Per-route last-turn income stored as `route.goodsExportIncomeLast`.
+- **Stockpile reserve control** (`actions.js`, `render.js`): Player sets a reserve floor (range slider 0 → stockpileMax) in the Military tab supply section. Only goods above the reserve are eligible for export. `setGoodsStockpileReserve(value)` action added.
+- **Stockpile UI** (`render.js`): Military tab supply section gains a stockpile bar (yellow), reserve slider, and a hint line describing available-for-export units and how many routes have export enabled.
+- **Route card UI** (`render.js`): Trade route cards show the `🏭 Goods ON/OFF` toggle and the last-turn goods export income (or a dim note when surplus is zero or the nation has no demand).
+- **Stockpile/export CSS** (`style.css`): `.mil-stockpile-section`, `.mil-bar-stockpile`, `.stockpile-reserve-row`, `.stockpile-reserve-label`, `.stockpile-reserve-slider`, `.stockpile-reserve-hint`, `.btn-tr-goods-export`, `.btn-tr-goods-export.active`, `.tr-route-goods-income`, `.tr-route-goods-warning`.
+
+### Constants added (`constants.js`)
+- `STOCKPILE_CAP_TURNS` (10), `GOODS_EXPORT_BASE_PRICE` (4.0), `GOODS_QUALITY_MFG_BONUS` (0.5), `GOODS_AI_DEMAND_MIL_CEILING` (80), `GOODS_EXPORT_MAX_PER_ROUTE` (8)
+
+### State fields added (`state.js`)
+- `G.goodsStockpile` — current stockpile (units)
+- `G.goodsStockpileReserve` — player-set reserve before exporting
+- `G.goodsStockpileDrawRatio` — fraction of demand covered by stockpile draw this turn
+
+---
+
+## [Unreleased] — Phase 5.8b: Strategic Bombing & Naval Supply Interdiction
+
+### Added
+- **Province bomb damage accumulation** (`actions.js` — `endTurn` section 2.4d): Air Force commanders on `strategicBombing` mission now accumulate damage points on target nation provinces each turn (`BOMBING_DAMAGE_PER_STR × effStr / numTargetProvs` per province). When a province reaches `BOMBING_DEV_DROP_THRESHOLD` (10 pts), its development drops by 1.
+- **AI symmetric bombing** (`actions.js`): Nations actively at war with the player use `militaryLevel × AI_BOMBING_STRENGTH_FRACTION` as air attack strength against adjacent player provinces each turn.
+- **Manufacturing debuff from bombing** (`engine.js`): `getGoodsProduced()` is reduced by up to `BOMBING_MFG_DEBUFF_MAX` (40%) based on `G.bombingMfgDebuff`, which scales with total AI bombing strength.
+- **Supply drain from bombing** (`engine.js`): `getSupplyRatio()` is reduced by up to `BOMBING_SUPPLY_DRAIN_MAX` (30%) based on `G.bombingSupplyDrain`, which scales with the number of player provinces under active bombardment.
+- **Province bomb damage auto-repair** (`actions.js`): Provinces not bombed in a turn lose `BOMBING_REPAIR_DAMAGE_PER_TURN` (1) damage pt. After `BOMBING_DEV_REPAIR_TURNS` (4) consecutive unbombed turns, lost development recovers by 1.
+- **Naval interdiction — enemy mil drain** (`actions.js` — `endTurn` section 2.4i): When the player holds >50% sea control in a zone adjacent to an active war nation, that nation's `militaryLevel` is drained by `(control − 0.5) × 2 × NAVAL_INTERDICTION_MIL_DRAIN` per turn.
+- **Naval interdiction — maturity freeze** (`actions.js`): When sea control in a trade route zone drops below `NAVAL_INTERDICTION_MATURITY_FREEZE_THRESHOLD` (0.4), player trade route maturity growth in that zone is cancelled each turn.
+- **Bombing penalty rows in supply panel** (`render.js`): Manufacturing debuff % and supply drain % are shown as red warning rows in the Goods Supply section of the Military tab when active.
+- **Strategic bombing commander badge update** (`render.js`): Badge now shows both mil drain and total bomb damage per turn.
+- **Navy commander badge — interdiction status** (`render.js`): Badge now notes "Interdicting enemy supply" or "Route maturity frozen" when relevant sea control thresholds are reached.
+- **Province bomb damage banner** (`render.js`): Player province info panel shows a red banner with current damage accumulation and dev lost when under bombardment.
+- **Bomb damage CSS** (`style.css`): `.prov-bomb-damage-banner`, `.prov-bomb-damage-hint`, `.mil-bombing-penalty-row` styles added.
+
+### State fields added (`state.js`)
+- `G.provinceBombDamage` — per-province `{ damage, devLost, repairTurns }` accumulation object
+- `G.bombingMfgDebuff` — recomputed each turn; fraction by which manufacturing output is reduced
+- `G.bombingSupplyDrain` — recomputed each turn; fraction subtracted from supply ratio
+
+### Constants added (`constants.js`)
+- `BOMBING_DAMAGE_PER_STR`, `BOMBING_DEV_DROP_THRESHOLD`, `BOMBING_REPAIR_DAMAGE_PER_TURN`, `BOMBING_DEV_REPAIR_TURNS`
+- `BOMBING_MFG_DEBUFF_PER_STR`, `BOMBING_MFG_DEBUFF_MAX`
+- `BOMBING_SUPPLY_DRAIN_PER_PROV`, `BOMBING_SUPPLY_DRAIN_MAX`
+- `AI_BOMBING_STRENGTH_FRACTION`
+- `NAVAL_INTERDICTION_MIL_DRAIN`, `NAVAL_INTERDICTION_MATURITY_FREEZE_THRESHOLD`
+
+---
+
+## [Unreleased] — Phase 5.8a: Conquest & Occupation
+
+### Added
+- **Occupation resistance** (`actions.js` — `endTurn` section 2.4h): Every occupied enemy province accumulates resistance each turn. Growth scales with province development + distance from capital, reduced by education level. A commander with **Garrison order** suppresses resistance (flat base + per ready unit size). If resistance reaches 100, the province revolts and returns to its original owner.
+- **Per-turn occupation admin cost** (`actions.js`): Each occupied province drains `development × $2M/turn` from treasury automatically.
+- **Garrison order for army commanders** (`render.js`, `engine.js`, `actions.js`): Army commanders can now be set to "Garrison Occupied Province…" order. Units march to the target occupied province via the extended movement set (player provinces + occupied provinces). `getCommanderDeploymentProvince` handles the new order type.
+- **Integration period** (`actions.js` — `offerPeace`, `endTurn`): When a province is formally annexed in a peace deal, it enters an integration countdown (`development × 6 turns`, reduced by `floor(educationLevel / 20) × 2`). During integration the province does not contribute deposit slots or resources.
+- **Territory score growth** (`actions.js`): When integration completes, `G.territoryScore` increases by `development × 0.1`.
+- **`G.integratingProvinces`** (`state.js`): New state field `{ [provId]: { turnsRemaining } }` tracking integration progress.
+- **Occupation info panel** (`render.js`): Clicking an occupied enemy province on the map now shows an info panel with resistance level, turns held, and garrison status instead of the nation panel.
+- **Integration banner** (`render.js`): Player province panel shows a blue banner with turns remaining during integration.
+- **Peace deal resistance display** (`render.js`): Each province in the peace deal modal shows dev, resistance level (colour-coded), and estimated integration time.
+- **Territory Score dashboard card** (`render.js`): New indicator card in the Overview tab showing current territory score and number of provinces currently integrating.
+
+### Constants added (`constants.js`)
+- `OCCUPATION_RESISTANCE_BASE_GROWTH`, `OCCUPATION_DISTANCE_RESISTANCE_BONUS`, `OCCUPATION_EDU_SUPPRESSION`, `OCCUPATION_GARRISON_SUPPRESSION_BASE`, `OCCUPATION_GARRISON_SUPPRESSION_PER_SIZE`, `OCCUPATION_ADMIN_COST_PER_DEV`, `OCCUPATION_REVOLT_THRESHOLD`
+- `INTEGRATION_TURNS_PER_DEV`, `INTEGRATION_EDU_REDUCTION_PER_20`, `TERRITORY_SCORE_PER_DEV`
+
+---
+
 ## [Unreleased] — Phase 5.7f: Commander Brain + Naval/Air Unit Rosters
 
 ### Added

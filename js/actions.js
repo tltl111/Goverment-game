@@ -145,12 +145,14 @@ function _finaliseTradeRoute(nationId, offer, isRenegotiation) {
     showNotification('🤝 Trade deal renegotiated with ' + NATIONS[nationId].name + '!', 'good');
   } else {
     G.tradeRoutes.push({
-      id:           G.nextTradeRouteId++,
+      id:                    G.nextTradeRouteId++,
       nationId,
       exportQuality,
       importQuality,
-      maturity:     0,
-      seaZone:      NATIONS[nationId]?.seaZone || null,
+      maturity:              0,
+      seaZone:               NATIONS[nationId]?.seaZone || null,
+      goodsExportEnabled:    false,
+      goodsExportIncomeLast: 0,
     });
     const firstContactNs = G.nations[nationId];
     if (firstContactNs) {
@@ -226,6 +228,21 @@ function closeTradeRoute(routeId) {
   }
   addLog('Trade route with ' + nationName + ' closed. Relations damaged.', 'warn');
   showNotification('Trade route with ' + nationName + ' closed.', 'info');
+  renderAll();
+}
+
+// Toggle manufactured goods export on a trade route (Phase 5.9).
+function toggleRouteGoodsExport(routeId) {
+  const route = G.tradeRoutes.find(r => r.id === routeId);
+  if (!route) return;
+  route.goodsExportEnabled = !route.goodsExportEnabled;
+  renderAll();
+}
+
+// Set how many goods units to keep in reserve before exporting surplus (Phase 5.9).
+function setGoodsStockpileReserve(value) {
+  const max = getGoodsStockpileMax();
+  G.goodsStockpileReserve = Math.max(0, Math.min(max, parseFloat(value) || 0));
   renderAll();
 }
 
@@ -858,11 +875,15 @@ function declareWar(nationId) {
 function offerPeace(nationId, keepProvIds) {
   const keepSet = new Set(keepProvIds || []);
 
-  // Formally transfer kept provinces to player empire
+  // Formally transfer kept provinces to player empire; start integration period
   for (const provId of keepSet) {
     if (G.occupiedProvinces[provId]?.originalOwner === nationId) {
       PROVINCES[provId].nationId = 'player';
       delete G.occupiedProvinces[provId];
+      if (!G.integratingProvinces) G.integratingProvinces = {};
+      const eduReduction = Math.floor(G.educationLevel / 20) * INTEGRATION_EDU_REDUCTION_PER_20;
+      const turns = Math.max(3, PROVINCES[provId].development * INTEGRATION_TURNS_PER_DEV - eduReduction);
+      G.integratingProvinces[provId] = { turnsRemaining: turns };
     }
   }
   // Return all other occupied provinces of this nation
@@ -1075,17 +1096,102 @@ function endTurn() {
   // (responses are now instant; this should not fire)
   // if (G.activeNegotiation?.status === 'awaiting') { _processNegotiationResponse(); }
 
-  // 2.4d. Strategic bombing — Air Force bombers degrade target nation militaryLevel
-  for (const cmd of (G.commanders || [])) {
-    if (cmd.branch !== 'airForce' || cmd.mission !== 'strategicBombing' || !cmd.target) continue;
-    const effStr = getAirCommanderEffectiveStrength(cmd);
-    if (effStr <= 0) continue;
-    const nation = G.nations[cmd.target];
-    if (!nation) continue;
-    const drain = effStr * STRATEGIC_BOMBING_DRAIN;
-    nation.militaryLevel = Math.max(0, nation.militaryLevel - drain);
-    if (drain > 0.05) {
-      addLog('✈️ Strategic bombing of ' + NATIONS[cmd.target]?.name + ': enemy military −' + drain.toFixed(2), 'good');
+  // 2.4d. Strategic bombing — Air Force bombers degrade target nation militaryLevel + province dev (Phase 5.8b)
+  {
+    if (!G.provinceBombDamage) G.provinceBombDamage = {};
+    G.bombingMfgDebuff   = 0;
+    G.bombingSupplyDrain = 0;
+    const bombedThisTurn = new Set();
+
+    // --- Player bombing enemy provinces ---
+    for (const cmd of (G.commanders || [])) {
+      if (cmd.branch !== 'airForce' || cmd.mission !== 'strategicBombing' || !cmd.target) continue;
+      const effStr = getAirCommanderEffectiveStrength(cmd);
+      if (effStr <= 0) continue;
+      const nation = G.nations[cmd.target];
+      if (!nation) continue;
+
+      // Existing: drain enemy militaryLevel
+      const drain = effStr * STRATEGIC_BOMBING_DRAIN;
+      nation.militaryLevel = Math.max(0, nation.militaryLevel - drain);
+      if (drain > 0.05) {
+        addLog('✈️ Strategic bombing of ' + NATIONS[cmd.target]?.name + ': enemy military −' + drain.toFixed(2), 'good');
+      }
+
+      // New: distribute bomb damage across target provinces within bombing range
+      const airfields = getAirfieldProvinces();
+      const targetProvs = Object.entries(PROVINCES)
+        .filter(([id, p]) => p.nationId === cmd.target && bfsMinHops(airfields, [id]) <= STRATEGIC_BOMBING_RANGE)
+        .map(([id]) => id);
+      if (targetProvs.length === 0) continue;
+      const damagePerProv = (effStr * BOMBING_DAMAGE_PER_STR) / targetProvs.length;
+      for (const provId of targetProvs) {
+        bombedThisTurn.add(provId);
+        if (!G.provinceBombDamage[provId]) G.provinceBombDamage[provId] = { damage: 0, devLost: 0, repairTurns: 0 };
+        const bd = G.provinceBombDamage[provId];
+        bd.repairTurns = 0;
+        bd.damage += damagePerProv;
+        if (bd.damage >= BOMBING_DEV_DROP_THRESHOLD && PROVINCES[provId].development > 1) {
+          PROVINCES[provId].development -= 1;
+          bd.devLost += 1;
+          bd.damage -= BOMBING_DEV_DROP_THRESHOLD;
+          addLog(`💥 Bombing: ${PROVINCES[provId]?.name || provId} infrastructure damaged (dev now ${PROVINCES[provId].development})`, 'good');
+        }
+      }
+    }
+
+    // --- AI bombing player provinces (symmetric) ---
+    let totalAiBombingStr  = 0;
+    let playerProvsBombed  = 0;
+    for (const war of (G.wars || [])) {
+      const nation = G.nations[war.nationId];
+      if (!nation) continue;
+      const aiStr = nation.militaryLevel * AI_BOMBING_STRENGTH_FRACTION;
+      if (aiStr <= 0) continue;
+      // AI bombs player provinces adjacent to enemy-controlled territory
+      const playerProvsNearEnemy = Object.keys(PROVINCES).filter(id => {
+        if (PROVINCES[id].nationId !== 'player') return false;
+        return (PROVINCES[id].adjacency || []).some(adj => PROVINCES[adj]?.nationId === war.nationId);
+      });
+      if (playerProvsNearEnemy.length === 0) continue;
+      totalAiBombingStr += aiStr;
+      const damagePerProv = (aiStr * BOMBING_DAMAGE_PER_STR) / playerProvsNearEnemy.length;
+      for (const provId of playerProvsNearEnemy) {
+        bombedThisTurn.add(provId);
+        playerProvsBombed++;
+        if (!G.provinceBombDamage[provId]) G.provinceBombDamage[provId] = { damage: 0, devLost: 0, repairTurns: 0 };
+        const bd = G.provinceBombDamage[provId];
+        bd.repairTurns = 0;
+        bd.damage += damagePerProv;
+        if (bd.damage >= BOMBING_DEV_DROP_THRESHOLD && PROVINCES[provId].development > 1) {
+          PROVINCES[provId].development -= 1;
+          bd.devLost += 1;
+          bd.damage -= BOMBING_DEV_DROP_THRESHOLD;
+          addLog(`💥 Enemy bombing: ${PROVINCES[provId]?.name || provId} infrastructure damaged (dev now ${PROVINCES[provId].development})`, 'bad');
+        }
+      }
+    }
+
+    // Per-turn penalties from AI bombing — reset to 0 when no active wars
+    G.bombingMfgDebuff   = Math.min(BOMBING_MFG_DEBUFF_MAX,    totalAiBombingStr  * BOMBING_MFG_DEBUFF_PER_STR);
+    G.bombingSupplyDrain = Math.min(BOMBING_SUPPLY_DRAIN_MAX,   playerProvsBombed  * BOMBING_SUPPLY_DRAIN_PER_PROV);
+
+    // Auto-repair for provinces not bombed this turn
+    for (const [provId, bd] of Object.entries(G.provinceBombDamage)) {
+      if (bombedThisTurn.has(provId)) continue;
+      bd.repairTurns += 1;
+      bd.damage = Math.max(0, bd.damage - BOMBING_REPAIR_DAMAGE_PER_TURN);
+      if (bd.repairTurns >= BOMBING_DEV_REPAIR_TURNS && bd.devLost > 0) {
+        PROVINCES[provId].development += 1;
+        bd.devLost -= 1;
+        bd.repairTurns = 0;
+        if (bd.devLost <= 0 && bd.damage <= 0) {
+          delete G.provinceBombDamage[provId];
+          if (PROVINCES[provId]?.nationId === 'player') {
+            addLog(`🔧 ${PROVINCES[provId]?.name || provId} infrastructure repaired — development restored.`, 'good');
+          }
+        }
+      }
     }
   }
 
@@ -1234,20 +1340,23 @@ function endTurn() {
   }
 
   // 2.4f. Army unit movement toward deployment province (Phase 5.7b)
-  // Only for non-wartime orders (hold/stage/defend); 'advance' is handled in 2.4g.
+  // Non-wartime orders: hold/stage/defend/garrison. 'advance' is handled in 2.4g.
   {
     const playerSet = new Set(Object.keys(PROVINCES).filter(id => PROVINCES[id].nationId === 'player'));
+    const occupiedSet = new Set(Object.keys(G.occupiedProvinces || {}));
+    const extendedSet = new Set([...playerSet, ...occupiedSet]); // garrison units may enter occupied provinces
     for (const cmd of (G.commanders || [])) {
       if (cmd.branch !== 'army') continue;
       if (cmd.order?.type === 'advance') continue; // handled in war section below
       const deployProv = getCommanderDeploymentProvince(cmd);
+      const moveSet = cmd.order?.type === 'garrison' ? extendedSet : playerSet;
       for (const unit of (cmd.units || [])) {
         if (unit.status !== 'ready' || !unit.position || unit.position === deployProv) continue;
         unit.moveTimer = (unit.moveTimer || 0) + 1;
         const turnsPerHop = getUnitTurnsPerHop(unit.type);
         if (unit.moveTimer >= turnsPerHop) {
           unit.moveTimer = 0;
-          const path = bfsPath([unit.position], [deployProv], playerSet);
+          const path = bfsPath([unit.position], [deployProv], moveSet);
           if (path && path.length >= 2) {
             unit.position = path[1];
           }
@@ -1306,7 +1415,7 @@ function endTurn() {
       }
       // Capture
       if (G.siegeState[provId].progress >= 100) {
-        G.occupiedProvinces[provId] = { originalOwner: nationId };
+        G.occupiedProvinces[provId] = { originalOwner: nationId, resistance: 0, turnsHeld: 0 };
         delete G.siegeState[provId];
         addLog(`⚔️ ${PROVINCES[provId]?.name || provId} captured!`, 'good');
       }
@@ -1371,6 +1480,197 @@ function endTurn() {
     if (!war.sueForPeaceOffered && getOccupiedFraction(nationId) >= SUE_FOR_PEACE_THRESHOLD) {
       war.sueForPeaceOffered = true;
       addLog(`🏳️ ${NATIONS[nationId]?.name} is requesting peace negotiations.`, 'neutral');
+    }
+  }
+
+  // 2.4h. Occupation resistance, admin cost, revolts & integration ticks (Phase 5.8a)
+  {
+    const capitalId = getCapitalProvinceId();
+
+    // Admin cost + resistance tick for every occupied province
+    for (const [provId, occData] of Object.entries(G.occupiedProvinces || {})) {
+      const prov = PROVINCES[provId];
+      if (!prov) continue;
+
+      // Per-turn administrative drain
+      G.treasury -= prov.development * OCCUPATION_ADMIN_COST_PER_DEV;
+
+      // Ensure resistance fields exist (backwards-compat with saves before 5.8a)
+      if (occData.resistance === undefined) occData.resistance = 0;
+      if (occData.turnsHeld === undefined) occData.turnsHeld = 0;
+      occData.turnsHeld += 1;
+
+      // Resistance growth — scales with development, distance, education
+      const distHops = bfsMinHops([capitalId], [provId]);
+      const distBonus = Math.max(0, distHops - 2) * OCCUPATION_DISTANCE_RESISTANCE_BONUS;
+      const eduReduction = G.educationLevel * OCCUPATION_EDU_SUPPRESSION;
+      const growth = Math.max(0, prov.development * OCCUPATION_RESISTANCE_BASE_GROWTH + distBonus - eduReduction);
+
+      // Garrison suppression — army commander with garrison order targeting this province
+      const garrisonCmd = (G.commanders || []).find(
+        c => c.branch === 'army' && c.order?.type === 'garrison' && c.order?.target === provId
+      );
+      let suppression = 0;
+      if (garrisonCmd) {
+        const garrisonSize = (garrisonCmd.units || [])
+          .filter(u => u.status === 'ready' && u.position === provId)
+          .reduce((s, u) => s + u.size, 0);
+        suppression = OCCUPATION_GARRISON_SUPPRESSION_BASE + garrisonSize * OCCUPATION_GARRISON_SUPPRESSION_PER_SIZE;
+      }
+
+      occData.resistance = Math.min(OCCUPATION_REVOLT_THRESHOLD, Math.max(0, occData.resistance + growth - suppression));
+
+      // Revolt: province returns to its original owner
+      if (occData.resistance >= OCCUPATION_REVOLT_THRESHOLD) {
+        const originalOwner = occData.originalOwner;
+        delete G.occupiedProvinces[provId];
+        delete G.siegeState[provId];
+        addLog(`🔥 ${prov.name} has revolted and returned to ${NATIONS[originalOwner]?.name || originalOwner}!`, 'bad');
+      }
+    }
+
+    // Integration tick — each turn reduces remaining integration time
+    for (const [provId, intData] of Object.entries(G.integratingProvinces || {})) {
+      intData.turnsRemaining = Math.max(0, intData.turnsRemaining - 1);
+      if (intData.turnsRemaining <= 0) {
+        delete G.integratingProvinces[provId];
+        const prov = PROVINCES[provId];
+        G.territoryScore = (G.territoryScore || 1) + (prov?.development || 1) * TERRITORY_SCORE_PER_DEV;
+        addLog(`✅ ${prov?.name || provId} has been fully integrated into the empire.`, 'good');
+      }
+    }
+  }
+
+  // 2.4i. Naval interdiction — Phase 5.8b
+  // Player sea superiority drains adjacent enemy nations' militaryLevel.
+  // Enemy sea superiority freezes player coastal trade route maturity growth.
+  {
+    for (const [zoneId] of Object.entries(SEA_PROVINCES)) {
+      const seaControl = getSeaControlForZone(zoneId);
+      const zone = SEA_PROVINCES[zoneId];
+
+      // Player dominant → drain adjacent enemy nations' military supply (militaryLevel)
+      if (seaControl > 0.5 && G.wars?.length > 0) {
+        const drainMult = (seaControl - 0.5) * 2; // 0 at 50% control, 1 at 100% control
+        for (const nationId of (zone.adjacentNations || [])) {
+          const nation = G.nations[nationId];
+          if (!nation) continue;
+          const isEnemy = (G.wars || []).some(w => w.nationId === nationId);
+          if (!isEnemy) continue;
+          const milDrain = drainMult * NAVAL_INTERDICTION_MIL_DRAIN;
+          nation.militaryLevel = Math.max(0, nation.militaryLevel - milDrain);
+        }
+      }
+
+      // Enemy dominant → freeze player coastal trade route maturity (undo this turn's increment)
+      if (seaControl < NAVAL_INTERDICTION_MATURITY_FREEZE_THRESHOLD) {
+        for (const route of (G.tradeRoutes || [])) {
+          if (route.seaZone === zoneId) {
+            route.maturity = Math.max(0, route.maturity - 1);
+          }
+        }
+      }
+    }
+  }
+
+  // 2.4j. Goods stockpile & export — Phase 5.9
+  // Step 1: Draw from stockpile to cover any supply deficit this turn.
+  // Step 2: Accumulate any surplus into the stockpile (up to cap).
+  // Step 3: Export goods above the reserve to enabled trade routes.
+  {
+    if (G.goodsStockpile          === undefined) G.goodsStockpile          = 0;
+    if (G.goodsStockpileReserve   === undefined) G.goodsStockpileReserve   = 0;
+    G.goodsStockpileDrawRatio = 0;
+
+    const gpProduced  = getGoodsProduced();
+    const gpDelivered = getGoodsDelivered();
+    const gpDemand    = getTotalGoodsDemand();
+    const stockMax    = getGoodsStockpileMax();
+
+    // Step 1: draw from stockpile on deficit
+    if (gpDelivered < gpDemand) {
+      const deficitUnits = gpDemand - gpDelivered;
+      const draw = Math.min(G.goodsStockpile, deficitUnits);
+      if (draw > 0) {
+        G.goodsStockpile -= draw;
+        G.goodsStockpileDrawRatio = gpDemand > 0 ? draw / gpDemand : 0;
+        addLog('Goods deficit — stockpile covered ' + draw.toFixed(1) + ' units (' + Math.round(G.goodsStockpileDrawRatio * 100) + '% of demand).', 'warn');
+      }
+    }
+
+    // Step 2: accumulate surplus
+    if (gpProduced > gpDemand) {
+      const surplus = gpProduced - gpDemand;
+      G.goodsStockpile = Math.min(stockMax, G.goodsStockpile + surplus);
+    }
+
+    // Step 3: export goods above reserve to enabled routes
+    const available = Math.max(0, G.goodsStockpile - (G.goodsStockpileReserve || 0));
+    const enabledRoutes = G.tradeRoutes.filter(r => r.goodsExportEnabled);
+
+    // Always reset last-turn income so UI is fresh
+    for (const route of G.tradeRoutes) route.goodsExportIncomeLast = 0;
+
+    if (available > 0 && enabledRoutes.length > 0) {
+      const routeDemands = enabledRoutes.map(r => ({
+        route:       r,
+        demandUnits: getNationGoodsDemandUnits(r.nationId),
+      }));
+      const totalExportDemand = routeDemands.reduce((s, d) => s + d.demandUnits, 0);
+
+      let totalExported    = 0;
+      let totalGoodsIncome = 0;
+
+      for (const { route, demandUnits } of routeDemands) {
+        if (demandUnits <= 0) continue;
+        const share      = totalExportDemand > 0 ? demandUnits / totalExportDemand : 0;
+        const allocated  = Math.min(demandUnits, available * share);
+        const qualityMod = 1 + (G.manufacturingLevel / 100) * GOODS_QUALITY_MFG_BONUS;
+        const matMult    = Math.min(1, route.maturity / TRADE_ROUTE_MATURITY_TURNS);
+        const seaMult    = getRouteSeaControlMultiplier(route);
+        const income     = allocated * GOODS_EXPORT_BASE_PRICE * matMult * qualityMod * seaMult;
+        route.goodsExportIncomeLast = income;
+        totalExported    += allocated;
+        totalGoodsIncome += income;
+      }
+
+      G.goodsStockpile = Math.max(0, G.goodsStockpile - totalExported);
+      G.treasury      += totalGoodsIncome;
+      if (totalGoodsIncome > 0) {
+        addLog('Manufactured goods export: +' + fmt(totalGoodsIncome) + ' (' + enabledRoutes.length + ' route' + (enabledRoutes.length !== 1 ? 's' : '') + ', ' + totalExported.toFixed(1) + ' units)', 'good');
+      }
+    }
+  }
+
+  // 2.4k. Fuel stockpile tick — Phase 5.10
+  // Oil refined via manufacturing → fuel pool. Draws on stockpile for deficit; accumulates on surplus.
+  // G.fuelStockpileDrawRatio is consumed by getFuelRatio() to boost effectiveness this turn.
+  {
+    if (G.fuelStockpile          === undefined) G.fuelStockpile          = 0;
+    if (G.fuelStockpileDrawRatio === undefined) G.fuelStockpileDrawRatio = 0;
+    G.fuelStockpileDrawRatio = 0;
+
+    const fuelProduced = getFuelProduced();
+    const fuelDemand   = getTotalFuelDemand();
+
+    // Step 1: draw from stockpile to cover any deficit
+    if (fuelDemand > 0 && fuelProduced < fuelDemand) {
+      const deficit = fuelDemand - fuelProduced;
+      const draw    = Math.min(G.fuelStockpile, deficit);
+      G.fuelStockpile         -= draw;
+      G.fuelStockpileDrawRatio = draw / fuelDemand;
+      const unmet = deficit - draw;
+      if (unmet > 0.01) {
+        const ratePct = Math.round(((fuelProduced + draw) / fuelDemand) * 100);
+        addLog('Fuel shortfall: ' + unmet.toFixed(1) + ' units unmet — fleet & air effectiveness ' + ratePct + '%.', 'warn');
+      }
+    }
+
+    // Step 2: accumulate surplus into stockpile
+    if (fuelProduced > fuelDemand) {
+      const surplus     = fuelProduced - fuelDemand;
+      const stockpileMax = getFuelStockpileMax();
+      G.fuelStockpile   = Math.min(stockpileMax, G.fuelStockpile + surplus);
     }
   }
 
@@ -1568,6 +1868,14 @@ function buildInstallation(type, provinceId) {
   const def = INSTALLATION_TYPES[type];
   if (!def) return;
   if (def.requiresCoastal && !province.coastal) return;
+  // Enforce per-type per-province cap if defined
+  if (def.maxPerProvince !== undefined) {
+    const existing = (G.installations || []).filter(i => i.type === type && i.provinceId === provinceId).length;
+    if (existing >= def.maxPerProvince) {
+      showNotification('Cannot build more than ' + def.maxPerProvince + ' ' + def.name + ' in one province.', 'bad');
+      return;
+    }
+  }
   const cost = getInstallationBuildCost(type, provinceId);
   if (G.treasury < cost) {
     showNotification('Not enough treasury — need ' + fmt(cost) + 'M to build ' + def.name, 'bad');
